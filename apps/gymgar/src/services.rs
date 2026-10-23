@@ -172,15 +172,20 @@ pub fn build(data_dir: &Path, ctx: egui::Context, rt: &tokio::runtime::Runtime) 
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::mpsc;
+    use std::sync::{Mutex, PoisonError, mpsc};
+    use std::thread::{self, ThreadId};
     use std::time::{Duration, Instant};
 
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use chrono::Utc;
-    use gymgar_domain::SecretBackend;
+    use gymgar_domain::{ConnectionStatus, SecretBackend};
+    use gymgar_engine::{Caller, EngineError, GarminStatusView, JobFinished, JobId, Outcome, Session};
+    use gymgar_store::Store;
     use secrecy::{ExposeSecret, SecretString};
+    use serde_json::{Value, json};
     use tempfile::TempDir;
+    use tokio::sync::Notify;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -410,6 +415,135 @@ mod tests {
         }));
         assert_eq!(second_done.recv_timeout(Duration::from_secs(5)), Ok(()), "the second job ran while the first one was blocked");
         assert_eq!(blocked_done.recv_timeout(Duration::from_secs(5)), Ok(true), "the first job saw the signal of the second");
+    }
+
+    /// A Garmin that answers `result` only after the test opens its gate, and tells the test which thread its check started
+    /// on and which key it was asked about.
+    struct GatedGarmin {
+        result: Result<(), GarminAuthError>,
+        gate: Arc<Notify>,
+        started: mpsc::Sender<ThreadId>,
+        asked_with: Mutex<Option<String>>,
+    }
+
+    impl GarminAuth for GatedGarmin {
+        fn check_key(&self, key: SecretString) -> BoxFuture<Result<(), GarminAuthError>> {
+            let _ = self.started.send(thread::current().id());
+            *self.asked_with.lock().unwrap_or_else(PoisonError::into_inner) = Some(key.expose_secret().to_owned());
+            let (gate, result) = (self.gate.clone(), self.result);
+            Box::pin(async move {
+                gate.notified().await;
+                result
+            })
+        }
+    }
+
+    /// What a `garmin.connect` left behind after it went through the real runtime, spawner and session.
+    struct Connected {
+        job: JobId,
+        finished: Vec<JobFinished>,
+        status: GarminStatusView,
+        asked_with: Option<String>,
+        key_file: PathBuf,
+        key_in_file: Option<String>,
+        /// Keeps the data directory until the test is done with the files in it.
+        _dir: TempDir,
+    }
+
+    /// Connects `KEY` the way the window does, with everything real except Garmin: the 2-worker runtime of the app,
+    /// `TokioSpawner`, a `Session` on a file database, and the file secret store. Garmin answers `result`, but only when
+    /// the test lets it. Asserts on the way what the window depends on: the command returns at once, the check runs on a
+    /// runtime thread, `notify` fires exactly once when it ends, and `poll_jobs` hands out its result exactly once.
+    fn connect_through_the_runtime(result: Result<(), GarminAuthError>) -> Connected {
+        let dir = TempDir::new().unwrap();
+        let rt = crate::build_runtime().expect("the app's runtime");
+        let key_file = dir.path().join("secrets").join("garmin-personal-api-key");
+        let file = Arc::new(FileSecretStore::new(key_file.clone()));
+        let gate = Arc::new(Notify::new());
+        let (started_tx, started_rx) = mpsc::channel();
+        let garmin = Arc::new(GatedGarmin { result, gate: gate.clone(), started: started_tx, asked_with: Mutex::new(None) });
+        let (notified_tx, notified_rx) = mpsc::channel();
+        let services = Services {
+            secrets: Some(SecretStores { system: None, file: file.clone(), prefer_file: true }),
+            garmin: Some(garmin.clone()),
+            spawner: Some(Arc::new(TokioSpawner(rt.handle().clone()))),
+            notify: Arc::new(move || {
+                let _ = notified_tx.send(());
+            }),
+            clock: Arc::new(Utc::now),
+        };
+        let mut session = Session::new(Store::open(&dir.path().join("gymgar.sqlite3")).unwrap(), services);
+
+        // If the command wrongly waited for Garmin, this would let it through after 5 seconds, and the checks below, which
+        // need the check to be still under way, would fail instead of the test hanging.
+        let watchdog = gate.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(5));
+            watchdog.notify_one();
+        });
+
+        let started = session.execute("garmin.connect", json!({ "apiKey": KEY, "keyTerm": 365 }), Caller::User);
+        let Ok(Outcome::Started(job)) = started else { panic!("garmin.connect did not start a job: {started:?}") };
+
+        // The command has answered, and Garmin has not: the check is under way on a runtime thread, held at the gate.
+        let check_thread = started_rx.recv_timeout(Duration::from_secs(5)).expect("the key check started on the runtime");
+        assert_ne!(check_thread, thread::current().id(), "the check must not run on the session's thread");
+        assert!(notified_rx.try_recv().is_err(), "notify fired before Garmin answered: the command waited for it");
+        assert!(session.poll_jobs().is_empty(), "a result arrived before Garmin answered");
+        let running = read_status(&mut session);
+        assert!(running.check_running, "the session does not know a check is running");
+        assert_eq!(running.status, ConnectionStatus::NotConnected);
+
+        // Garmin answers: the runtime finishes the job and wakes the window, once.
+        gate.notify_one();
+        notified_rx.recv_timeout(Duration::from_secs(5)).expect("notify woke the window");
+        let finished = session.poll_jobs();
+        assert!(notified_rx.try_recv().is_err(), "notify fired more than once for one job");
+        assert!(session.poll_jobs().is_empty(), "a result must be handed out once");
+
+        let status = read_status(&mut session);
+        assert!(!status.check_running, "the check still counts as running after its result was applied");
+        let asked_with = garmin.asked_with.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let key_in_file = file.get().unwrap().map(|key| key.expose_secret().to_owned());
+        Connected { job, finished, status, asked_with, key_file, key_in_file, _dir: dir }
+    }
+
+    fn read_status(session: &mut Session) -> GarminStatusView {
+        match session.execute("garmin.status", Value::Null, Caller::User) {
+            Ok(Outcome::Done(value)) => serde_json::from_value(value).unwrap(),
+            other => panic!("garmin.status: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_key_garmin_accepts_is_connected_through_the_runtime() {
+        let run = connect_through_the_runtime(Ok(()));
+        let [finished] = run.finished.as_slice() else { panic!("expected one finished job, got {:?}", run.finished) };
+        assert_eq!((finished.id, finished.command), (run.job, "garmin.connect"));
+        let Ok(answer) = &finished.result else { panic!("the connect failed: {:?}", finished.result) };
+        assert_eq!(answer.get("status"), Some(&json!("connected")), "{answer}");
+        assert!(!answer.to_string().contains(KEY), "the answer carries the key: {answer}");
+
+        assert_eq!(run.status.status, ConnectionStatus::Connected);
+        assert_eq!(run.status.secret_backend, Some(SecretBackend::File));
+        assert!(run.status.key_expires_at.is_some());
+        assert_eq!(run.asked_with.as_deref(), Some(KEY), "Garmin was asked about the key that was typed");
+        assert_eq!(run.key_in_file.as_deref(), Some(KEY), "the key is in the file store");
+        assert_eq!(std::fs::read_to_string(&run.key_file).unwrap(), KEY, "and in the file the adapter reports");
+    }
+
+    #[test]
+    fn a_key_garmin_rejects_saves_nothing_through_the_runtime() {
+        let run = connect_through_the_runtime(Err(GarminAuthError::KeyRejected));
+        let [finished] = run.finished.as_slice() else { panic!("expected one finished job, got {:?}", run.finished) };
+        assert_eq!((finished.id, finished.command), (run.job, "garmin.connect"));
+        assert_eq!(finished.result, Err(EngineError::Garmin(GarminAuthError::KeyRejected)));
+
+        assert_eq!(run.status.status, ConnectionStatus::NotConnected);
+        assert_eq!(run.status.secret_backend, None);
+        assert_eq!(run.asked_with.as_deref(), Some(KEY), "Garmin was asked, and said no");
+        assert_eq!(run.key_in_file, None, "a rejected key is not stored");
+        assert!(!run.key_file.exists(), "no key file was created");
     }
 
     #[test]

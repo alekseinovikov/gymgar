@@ -33,5 +33,7 @@ tempfile = { workspace = true }
 # A local Garmin for the adapter test, and the fake token it answers with.
 wiremock = { workspace = true }
 base64 = { workspace = true }
-# `time` for a job that waits on the runtime's timer.
-tokio = { workspace = true, features = ["time"] }
+# `time` for a job that waits on the runtime's timer; `sync` for the gate a fake Garmin waits at.
+tokio = { workspace = true, features = ["time", "sync"] }
+# Params of the commands the wiring test runs, and the status answers it reads.
+serde_json = { workspace = true }
