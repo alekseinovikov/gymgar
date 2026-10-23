@@ -51,6 +51,19 @@ impl SecretStores {
             SecretBackend::File => Some(&self.file),
         }
     }
+
+    /// Where a key connected now is saved. This is the one place the rule lives, so `garmin.status` and
+    /// `garmin.connect` cannot disagree. Files are used when preferred (debug builds); otherwise the system store is
+    /// used if there is one; otherwise a file, but only after the user agrees ([`SecretStores::needs_file_consent`]).
+    pub fn new_key_backend(&self) -> SecretBackend {
+        if self.prefer_file || self.system.is_none() { SecretBackend::File } else { SecretBackend::System }
+    }
+
+    /// Whether a new key may go to the file store only with the user's consent: there is no system store and files
+    /// are not preferred anyway. `garmin.connect` refuses (`FileStoreConsentRequired`) before any network call.
+    pub fn needs_file_consent(&self) -> bool {
+        self.system.is_none() && !self.prefer_file
+    }
 }
 
 /// Checks a Garmin Personal API key by exchanging it for a token.
@@ -97,4 +110,34 @@ pub struct Services {
     pub notify: Arc<dyn Fn() + Send + Sync>,
     /// The current time; injected so tests control expiry dates and warnings.
     pub clock: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::MemorySecretStore;
+
+    fn stores(system: bool, prefer_file: bool) -> SecretStores {
+        SecretStores {
+            system: system.then(|| Arc::new(MemorySecretStore::new(SecretBackend::System)) as Arc<dyn SecretStore>),
+            file: Arc::new(MemorySecretStore::new(SecretBackend::File)),
+            prefer_file,
+        }
+    }
+
+    #[test]
+    fn new_key_storage_rule() {
+        // (system store present, prefer_file) -> (new key backend, needs file consent)
+        let rule = [
+            (true, false, SecretBackend::System, false),
+            (true, true, SecretBackend::File, false),
+            (false, true, SecretBackend::File, false),
+            (false, false, SecretBackend::File, true),
+        ];
+        for (system, prefer_file, backend, consent) in rule {
+            let stores = stores(system, prefer_file);
+            assert_eq!(stores.new_key_backend(), backend, "system {system}, prefer_file {prefer_file}");
+            assert_eq!(stores.needs_file_consent(), consent, "system {system}, prefer_file {prefer_file}");
+        }
+    }
 }

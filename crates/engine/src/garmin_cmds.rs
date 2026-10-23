@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use crate::commands::{always, done};
 use crate::params::{self, NoParams};
-use crate::{CommandKind, CommandSpec, EngineError, Outcome, SecretStore, Session};
+use crate::{CommandKind, CommandSpec, EngineError, Outcome, SecretStore, SecretStores, Session};
 
 const STATUS: &str = "garmin.status";
 const DISCONNECT: &str = "garmin.disconnect";
@@ -33,9 +33,12 @@ pub struct GarminStatusView {
     pub expiry_warning: bool,
     /// Where the connected key is kept; `None` when not connected.
     pub secret_backend: Option<SecretBackend>,
-    /// A key connected now would go to the system secret store: it exists and files are not preferred (debug builds
-    /// prefer files). When `false`, the key would go to a file.
+    /// The system secret store exists in this session (debug builds may still prefer files: see `new_key_backend`).
     pub system_store_available: bool,
+    /// Where a key connected now would be saved; `None` when this session has no secret stores (the CLI).
+    pub new_key_backend: Option<SecretBackend>,
+    /// A key connected now could only go to a file, which needs the user's consent (`allowFileStore`).
+    pub file_store_needs_consent: bool,
     /// A key check (connect or verify) is in flight.
     pub check_running: bool,
 }
@@ -84,7 +87,9 @@ fn status_view(session: &Session) -> Result<GarminStatusView, EngineError> {
         last_verified_at: connection.as_ref().and_then(|c| c.last_verified_at),
         expiry_warning: connection.as_ref().is_some_and(|c| expiry_warning(c.key_expires_at, now)),
         secret_backend: connection.as_ref().map(|c| c.secret_backend),
-        system_store_available: secrets.is_some_and(|s| s.system.is_some() && !s.prefer_file),
+        system_store_available: secrets.is_some_and(|s| s.system.is_some()),
+        new_key_backend: secrets.map(SecretStores::new_key_backend),
+        file_store_needs_consent: secrets.is_some_and(SecretStores::needs_file_consent),
         check_running: false,
     })
 }
@@ -149,6 +154,8 @@ mod tests {
                     expiry_warning: false,
                     secret_backend: None,
                     system_store_available: true,
+                    new_key_backend: Some(SecretBackend::System),
+                    file_store_needs_consent: false,
                     check_running: false,
                 }
             );
@@ -157,6 +164,8 @@ mod tests {
         assert_eq!(raw.get("status"), Some(&json!("notConnected")));
         assert_eq!(raw.get("expiryWarning"), Some(&json!(false)));
         assert_eq!(raw.get("keyExpiresAt"), Some(&Value::Null));
+        assert_eq!(raw.get("newKeyBackend"), Some(&json!("system")));
+        assert_eq!(raw.get("fileStoreNeedsConsent"), Some(&json!(false)));
     }
 
     #[test]
@@ -194,12 +203,19 @@ mod tests {
     }
 
     #[test]
-    fn status_tells_whether_a_new_key_goes_to_the_system_store() {
-        let (mut no_system, _) = test_session_with(TestConfig { system_store: false, ..TestConfig::default() });
-        assert!(!read_status(&mut no_system, Caller::User).system_store_available);
-        let (mut debug_build, _) = test_session_with(TestConfig { prefer_file: true, ..TestConfig::default() });
-        assert!(!read_status(&mut debug_build, Caller::User).system_store_available);
-        assert!(!read_status(&mut headless_session(), Caller::Agent).system_store_available);
+    fn status_reports_where_a_new_key_goes() {
+        let with_stores = |system_store, prefer_file| test_session_with(TestConfig { system_store, prefer_file, ..TestConfig::default() }).0;
+        // (case, session, systemStoreAvailable, newKeyBackend, fileStoreNeedsConsent)
+        let cases = [
+            ("CLI without secret stores", headless_session(), false, None, false),
+            ("debug build, system store present", with_stores(true, true), true, Some(SecretBackend::File), false),
+            ("release build with a system store", with_stores(true, false), true, Some(SecretBackend::System), false),
+            ("release build without a system store", with_stores(false, false), false, Some(SecretBackend::File), true),
+        ];
+        for (case, mut session, available, backend, consent) in cases {
+            let view = read_status(&mut session, Caller::Agent);
+            assert_eq!((view.system_store_available, view.new_key_backend, view.file_store_needs_consent), (available, backend, consent), "{case}");
+        }
     }
 
     #[test]
