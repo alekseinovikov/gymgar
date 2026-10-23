@@ -47,9 +47,11 @@ impl Store {
                 .map_err(|e| StoreError::Open { path: path.to_path_buf(), reason: format!("cannot create {}: {e}", parent.display()) })?;
         }
         // SQLite opens the file lazily: a file that is not a database only fails on the first real statement.
-        // Every step up to a usable connection is therefore mapped the same way, so callers always see the path.
+        // Every step up to a usable connection is therefore mapped the same way: `Sql` becomes `Open { path, .. }`
+        // and `Corrupt` gets the path prefixed to its text. `Busy` has no field for a path and is left as is.
         Connection::open(path).map_err(StoreError::from).and_then(|conn| Store::init(conn, busy_timeout, true)).map_err(|error| match error {
             StoreError::Sql(reason) => StoreError::Open { path: path.to_path_buf(), reason },
+            StoreError::Corrupt(reason) => StoreError::Corrupt(format!("{}: {reason}", path.display())),
             other => other,
         })
     }
@@ -162,6 +164,9 @@ mod tests {
             std::fs::write(&path, bytes).unwrap();
             let result = Store::open(&path);
             assert!(matches!(result, Err(StoreError::Corrupt(_) | StoreError::Open { .. })), "{name}: {result:?}");
+            // Whichever variant it is, the message must say which file is damaged.
+            let message = result.err().map(|error| error.to_string()).unwrap_or_default();
+            assert!(message.contains(&path.display().to_string()), "{name}: {message}");
         }
     }
 
