@@ -1,6 +1,6 @@
 [package]
 name = "gymgar-sync"
-description = "Two-way sync between the local store and Garmin Connect"
+description = "Garmin Connect sync: activity downloads, two-way workout sync with manual conflicts"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

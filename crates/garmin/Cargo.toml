@@ -1,6 +1,6 @@
 [package]
 name = "gymgar-garmin"
-description = "Garmin Connect client: auth, workouts, activities (standalone, no workspace deps)"
+description = "Garmin Connect client: Personal API for activities, web API for workouts (standalone)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

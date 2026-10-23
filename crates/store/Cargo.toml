@@ -1,6 +1,6 @@
 [package]
 name = "gymgar-store"
-description = "Gymgar local persistence of the domain model"
+description = "Gymgar SQLite persistence of the domain model, with a trash"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

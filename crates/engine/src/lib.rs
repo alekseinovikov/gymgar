@@ -1,4 +1,4 @@
-//! The Gymgar engine façade: the open session, history and the command registry.
+//! The Gymgar engine façade: the open session, the command registry and background jobs.
 //!
 //! L3. Every user-visible action is a command with a stable id (`workout.create`) and typed,
 //! JSON-serializable params. Every frontend goes through the same entry point: the egui UI, the

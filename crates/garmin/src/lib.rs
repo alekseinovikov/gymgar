@@ -1,5 +1,12 @@
-//! Garmin Connect client: authentication, workouts, activities and their exercise sets.
+//! Garmin Connect client over two channels:
+//!
+//! - `personal`: the official Personal API (the user's API key → access token). Read-only:
+//!   activities and health data.
+//! - `connect`: the undocumented Garmin Connect web API, used only for what `personal` cannot do:
+//!   create, edit and delete workouts, and read a workout's current version before changing it.
+//!   No background polling. It can break whenever Garmin changes it, so it has its own auth and
+//!   errors, and a failure here never affects `personal`.
 //!
 //! Standalone: depends on no workspace crate. It speaks Garmin's own data model (DTOs that mirror
-//! Garmin's JSON, unknown fields kept verbatim so a round-trip loses nothing). Mapping to and from
-//! `gymgar-domain` lives in `gymgar-sync`, not here.
+//! Garmin's JSON, unknown fields kept verbatim). Mapping to `gymgar-domain` lives in `gymgar-sync`.
+//! Keys, tokens and passwords never appear in logs or error messages.
