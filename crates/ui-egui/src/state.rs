@@ -1,8 +1,9 @@
 //! The purely visual state of the window: which section is open and the draft of the connect form.
 //!
-//! Plain data with `serde`, so eframe can keep it between runs and automation can read it. The key the user is typing
-//! is a draft that is never serialized and never printed. Everything else the screens show (the connection, the
-//! language) belongs to the engine and is read from it, not kept here.
+//! Plain data with `serde`, so eframe can keep it between runs and automation can read it. Only the section and the
+//! key term are kept: the key the user is typing (never serialized, never printed) and everything that is state of
+//! the moment (an error, a running check, a consent, a confirmation) starts over with each run. What the screens show
+//! of the outside world (the connection, the language) belongs to the engine and is read from it, not kept here.
 
 use std::fmt;
 
@@ -52,7 +53,9 @@ pub struct ConnectForm {
     pub key: String,
     /// The lifetime the user chose on Garmin's page.
     pub term: KeyTerm,
-    /// The user agreed to keep the key in a file because the system password store is unavailable.
+    /// The user agreed to keep the key in a file because the system password store is unavailable. Transient: the
+    /// consent is given again each time, so it never comes back ticked after a restart.
+    #[serde(skip)]
     pub allow_file_store: bool,
     /// Why the last attempt failed, already in the user's language.
     #[serde(skip)]
@@ -60,9 +63,12 @@ pub struct ConnectForm {
     /// The key check this form waits for.
     #[serde(skip)]
     pub pending: Option<JobId>,
-    /// The form is open to replace a key that is already connected.
+    /// The form is open to replace a key that is already connected. Transient.
+    #[serde(skip)]
     pub replacing: bool,
-    /// "Disconnect" was clicked and awaits confirmation.
+    /// "Disconnect" was clicked and awaits confirmation. Transient: a destructive confirmation must not come back
+    /// armed after a restart.
+    #[serde(skip)]
     pub confirm_disconnect: bool,
 }
 

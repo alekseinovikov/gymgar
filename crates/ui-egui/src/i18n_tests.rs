@@ -139,43 +139,73 @@ fn line_parsing() {
     assert!(matches!(parse_line("a\tb\tc"), Line::Malformed));
 }
 
-/// What `tl!` literals the source contains: the text between `tl!("` and the closing quote that is not escaped.
-const NEEDLE: &str = "tl!(\"";
+/// The name of the macro whose literals must have a translation.
+const MACRO: &str = "tl!";
 
-/// The `tl!` literals of `source`. A literal must end on its line; comment lines are skipped, so documentation can
-/// show the macro without needing a translation.
+/// The `tl!` literals of `source`, as the strings they stand for.
+///
+/// The whole text is scanned, not line by line, because rustfmt moves a long literal onto a line of its own between
+/// the brackets. Any whitespace may sit between the macro name, the bracket and the literal; ordinary and raw
+/// strings are read. Comment lines are skipped, so documentation can show the macro without a translation. What is
+/// not a string literal after `tl!` is skipped too: the macro takes nothing else, so the compiler refuses it.
 fn tl_literals(source: &str) -> Vec<String> {
+    let code = source.lines().filter(|line| !line.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
     let mut found = Vec::new();
-    for line in source.lines().filter(|line| !line.trim_start().starts_with("//")) {
-        let mut rest = line;
-        while let Some(at) = rest.find(NEEDLE) {
-            let mut chars = rest[at + NEEDLE.len()..].chars();
-            let mut literal = String::new();
-            let mut closed = false;
-            while let Some(c) = chars.next() {
-                match c {
-                    '"' => {
-                        closed = true;
-                        break;
-                    }
-                    '\\' => match chars.next() {
-                        Some('"') => literal.push('"'),
-                        Some('\\') => literal.push('\\'),
-                        Some(other) => {
-                            literal.push('\\');
-                            literal.push(other);
-                        }
-                        None => break,
-                    },
-                    other => literal.push(other),
-                }
-            }
-            assert!(closed, "a tl! literal must end on its line: {line}");
+    let mut from = 0;
+    while let Some(offset) = code[from..].find(MACRO) {
+        let start = from + offset;
+        from = start + MACRO.len();
+        // `html!` and `my_tl!` are other macros.
+        if code[..start].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        let Some(rest) = code[from..].trim_start().strip_prefix(['(', '[', '{']) else { continue };
+        if let Some(literal) = string_literal(rest.trim_start()) {
             found.push(literal);
-            rest = chars.as_str();
         }
     }
     found
+}
+
+/// The string literal `text` starts with, if it starts with one. Panics when the literal never ends.
+fn string_literal(text: &str) -> Option<String> {
+    if let Some(raw) = text.strip_prefix('r') {
+        let hashes = raw.chars().take_while(|&c| c == '#').count();
+        let body = raw[hashes..].strip_prefix('"')?;
+        let end = body.find(&format!("\"{}", "#".repeat(hashes))).expect("a raw tl! literal must be closed");
+        return Some(body[..end].to_owned());
+    }
+    let mut chars = text.strip_prefix('"')?.chars().peekable();
+    let mut literal = String::new();
+    loop {
+        match chars.next().expect("a tl! literal must be closed") {
+            '"' => return Some(literal),
+            '\\' => match chars.next().expect("a tl! literal must be closed") {
+                '"' => literal.push('"'),
+                '\\' => literal.push('\\'),
+                '\'' => literal.push('\''),
+                'n' => literal.push('\n'),
+                't' => literal.push('\t'),
+                'r' => literal.push('\r'),
+                '0' => literal.push('\0'),
+                'u' if chars.next_if_eq(&'{').is_some() => {
+                    let digits: String = std::iter::from_fn(|| chars.next_if(|c| *c != '}')).collect();
+                    chars.next();
+                    let escaped = u32::from_str_radix(&digits, 16).ok().and_then(char::from_u32);
+                    literal.push(escaped.expect("a valid unicode escape in a tl! literal"));
+                }
+                // A backslash at the end of a line continues the literal and drops the next line's indent.
+                '\n' => while chars.next_if(|c| c.is_whitespace()).is_some() {},
+                '\r' => while chars.next_if(|c| c.is_whitespace()).is_some() {},
+                // Any other escape is kept as written, so it fails the translation check loudly.
+                other => {
+                    literal.push('\\');
+                    literal.push(other);
+                }
+            },
+            other => literal.push(other),
+        }
+    }
 }
 
 fn rust_files(dir: &Path, into: &mut Vec<PathBuf>) {
@@ -193,6 +223,42 @@ fn rust_files(dir: &Path, into: &mut Vec<PathBuf>) {
 fn the_scanner_reads_literals() {
     let source = "let a = tl!(\"One\"); let b = tl!(\"Two \\\"quoted\\\" and back\\\\slash\");\n// tl!(\"A comment\")\nx(tl!(\"Three\"), tl!(\"Four\"))";
     assert_eq!(tl_literals(source), ["One", "Two \"quoted\" and back\\slash", "Three", "Four"]);
+}
+
+#[test]
+fn the_scanner_reads_the_form_rustfmt_makes_of_a_long_call() {
+    // rustfmt moves a long literal onto its own line, between the parentheses.
+    let source = "label(\n    tl!(\n        \"A long text that rustfmt moved to its own line\"\n    ),\n);";
+    assert_eq!(tl_literals(source), ["A long text that rustfmt moved to its own line"]);
+    // Any spacing is fine, and so is any of the three kinds of brackets.
+    let source = "tl! ( \"Spaced\" ) tl![\"Square\"] tl!{\"Curly\"} tl!(\t\"Tab\"\r\n)";
+    assert_eq!(tl_literals(source), ["Spaced", "Square", "Curly", "Tab"]);
+}
+
+#[test]
+fn the_scanner_reads_raw_strings() {
+    let source = "tl!(r\"Raw text\"); tl!(r#\"It said \"hi\" and left\"#); tl!(\n    r##\"A \"# inside\"##\n)";
+    assert_eq!(tl_literals(source), ["Raw text", "It said \"hi\" and left", "A \"# inside"]);
+}
+
+#[test]
+fn the_scanner_reads_escapes() {
+    // An escaped quote and backslash, a unicode escape, and a line continuation (which drops the next line's indent).
+    let source = "tl!(\"Say \\\"hi\\\" now\") tl!(\"back\\\\slash\") tl!(\"Don\\u{2019}t\") tl!(\"One \\\n        two\")";
+    assert_eq!(tl_literals(source), ["Say \"hi\" now", "back\\slash", "Don\u{2019}t", "One two"]);
+}
+
+#[test]
+fn the_scanner_skips_what_is_not_a_tl_call() {
+    // Comment lines, other macros whose name ends in `tl`, and a `tl!` that is not given a literal.
+    let source = "// tl!(\"In a comment\")\n    /// tl!(\"In a doc comment\")\nhtml!(\"Not ours\"); my_tl!(\"Neither\"); tl!(some_name); tl!(r); tl!(\"Ours\")";
+    assert_eq!(tl_literals(source), ["Ours"]);
+}
+
+#[test]
+#[should_panic(expected = "must be closed")]
+fn the_scanner_refuses_a_literal_that_never_ends() {
+    tl_literals("tl!(\"Never closed");
 }
 
 #[test]

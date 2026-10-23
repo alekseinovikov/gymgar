@@ -32,42 +32,40 @@ fn a_new_state_opens_the_summary_with_a_one_year_term() {
     assert_eq!((state.connect.error, state.connect.pending), (None, None));
 }
 
+/// What a restart brings back of `filled_in()`: the section and the term. Everything else is transient.
+fn after_a_restart() -> UiState {
+    UiState { section: Section::Settings, connect: ConnectForm { term: KeyTerm::Days90, ..ConnectForm::default() } }
+}
+
 #[test]
-fn the_key_the_error_and_the_pending_job_are_never_serialized() {
+fn only_the_section_and_the_term_are_serialized() {
     let json = serde_json::to_string(&filled_in()).expect("serialize");
     assert!(!json.contains(KEY), "{json}");
     assert!(!json.contains("did not accept"), "{json}");
-    for field in ["key", "error", "pending"] {
+    // The key, the error and the pending job are state of the moment; the consent to keep the key in a file and the
+    // two confirmations must be given again each time, so they do not come back armed after a restart either.
+    for field in ["key", "error", "pending", "allowFileStore", "replacing", "confirmDisconnect"] {
         assert!(!json.contains(&format!("\"{field}\"")), "`{field}` is serialized: {json}");
     }
 
     let restored: UiState = serde_json::from_str(&json).expect("deserialize");
-    let mut expected = filled_in();
-    expected.connect.key.clear();
-    expected.connect.error = None;
-    expected.connect.pending = None;
-    assert_eq!(restored, expected);
+    assert_eq!(restored, after_a_restart());
 }
 
 #[test]
-fn a_key_in_stored_json_is_ignored_not_restored() {
-    let json = format!(r#"{{"section":"settings","connect":{{"key":"{KEY}","error":"x","pending":3}}}}"#);
-    let state: UiState = serde_json::from_str(&json).expect("a stored `key` field is tolerated");
-    assert_eq!(state.section, Section::Settings);
-    assert!(state.connect.key.is_empty());
-    assert_eq!((state.connect.error, state.connect.pending), (None, None));
+fn transient_fields_in_stored_json_are_ignored_not_restored() {
+    // Data saved by an earlier build, which kept the flags, must not bring a consent or a confirmation back armed.
+    let json = format!(
+        r#"{{"section":"settings","connect":{{"key":"{KEY}","error":"x","pending":3,"allowFileStore":true,"replacing":true,"confirmDisconnect":true}}}}"#
+    );
+    let state: UiState = serde_json::from_str(&json).expect("stored transient fields are tolerated");
+    assert_eq!(state, UiState { section: Section::Settings, ..UiState::default() });
 }
 
 #[test]
 fn the_json_uses_the_names_of_the_commands() {
     let json = serde_json::to_value(filled_in()).expect("serialize");
-    assert_eq!(
-        json,
-        serde_json::json!({
-            "section": "settings",
-            "connect": { "term": 90, "allowFileStore": true, "replacing": true, "confirmDisconnect": true },
-        })
-    );
+    assert_eq!(json, serde_json::json!({ "section": "settings", "connect": { "term": 90 } }));
 }
 
 #[test]
@@ -115,8 +113,12 @@ fn the_state_survives_a_restart_without_the_draft_key() {
     assert!(storage.0.values().all(|stored| !stored.contains(KEY)), "the key reached the storage: {:?}", storage.0);
 
     let restored = UiState::load(Some(&storage));
-    assert_eq!((restored.section, restored.connect.term, restored.connect.allow_file_store), (Section::Settings, KeyTerm::Days90, true));
+    assert_eq!((restored.section, restored.connect.term), (Section::Settings, KeyTerm::Days90));
     assert!(restored.connect.key.is_empty());
+    // The consent and the confirmations were given for that moment only.
+    let form = &restored.connect;
+    assert_eq!((form.allow_file_store, form.replacing, form.confirm_disconnect), (false, false, false));
+    assert_eq!(restored, after_a_restart());
 }
 
 #[test]
