@@ -4,7 +4,7 @@
 //! Two things a widget cannot do for the caller: disable it (wrap it in `ui.add_enabled_ui`) and give a text field its
 //! accessible name (`Response::labelled_by` on the visible label).
 
-use egui::{Button, Color32, ComboBox, Frame, Id, Link, Margin, OpenUrl, Response, RichText, Role, Sense, Stroke, TextEdit, Ui, WidgetInfo, vec2};
+use egui::{Button, Color32, ComboBox, Frame, Id, Label, Link, Margin, OpenUrl, Response, RichText, Role, Sense, Stroke, TextEdit, Ui, WidgetInfo, vec2};
 
 use crate::theme::{Tokens, metrics};
 
@@ -86,6 +86,11 @@ pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
 
 /// An error or a warning, in a box tinted with the warning colour.
 pub fn warning_box(ui: &mut Ui, text: &str) {
+    warning_box_with(ui, text, |_| {});
+}
+
+/// A [`warning_box`] with more under its text, such as a link or a button that deals with the warning.
+pub fn warning_box_with<R>(ui: &mut Ui, text: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get(ui.ctx());
     Frame::new()
         .fill(t.warning.gamma_multiply(0.12))
@@ -95,7 +100,32 @@ pub fn warning_box(ui: &mut Ui, text: &str) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(RichText::new(text).color(t.warning));
-        });
+            add(ui)
+        })
+        .inner
+}
+
+/// The title of a screen, with an optional line of explanation under it.
+pub fn page_title(ui: &mut Ui, title: &str, subtitle: Option<&str>) {
+    let t = Tokens::get(ui.ctx());
+    let response = ui.add(Label::new(RichText::new(title).size(metrics::PAGE_TITLE_SIZE).color(t.text)));
+    // A heading for screen readers, which can jump from one to the next.
+    response.widget_info(|| WidgetInfo::labeled(Role::Heading, ui.is_enabled(), title));
+    if let Some(subtitle) = subtitle {
+        hint(ui, subtitle);
+    }
+}
+
+/// The title of a card.
+pub fn card_title(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(RichText::new(text).size(metrics::CARD_TITLE_SIZE).color(t.text));
+}
+
+/// A line of secondary text: explanations, dates, notes.
+pub fn hint(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(RichText::new(text).color(t.text_dim));
 }
 
 /// A link that opens `url` in the system browser, in a new tab. Hovering shows where it leads.

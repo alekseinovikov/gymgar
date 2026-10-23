@@ -84,6 +84,18 @@ pub mod metrics {
     pub const CARD_PADDING: i8 = 20;
     /// Padding inside a warning box.
     pub const BOX_PADDING: i8 = 12;
+    /// The widest a screen's content grows. A wider window leaves the rest empty rather than stretch the lines.
+    pub const CONTENT_MAX_WIDTH: f32 = 760.0;
+    /// The width of the card that invites the user to connect Garmin: a small card, not a page-wide one.
+    pub const INVITATION_WIDTH: f32 = 460.0;
+    /// Width of a text field in a form.
+    pub const FIELD_WIDTH: f32 = 420.0;
+    /// Diameter of the spinner shown while Garmin is asked.
+    pub const SPINNER_SIZE: f32 = 20.0;
+    /// Size of the title of a screen.
+    pub const PAGE_TITLE_SIZE: f32 = 24.0;
+    /// Size of the title of a card.
+    pub const CARD_TITLE_SIZE: f32 = 17.0;
 }
 
 fn tokens_id() -> Id {

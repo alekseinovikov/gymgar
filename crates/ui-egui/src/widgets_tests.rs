@@ -187,3 +187,68 @@ fn a_link_opens_its_address_in_a_new_browser_tab() {
     assert_eq!(opened, [("https://connect.garmin.com/app/settings/personalApiToken", true)]);
     assert!(*harness.state());
 }
+
+/// The colour the text `text` was painted in, read from the shapes of the last frame.
+fn text_colour(harness: &egui_kittest::Harness<'_, impl Sized>, text: &str) -> Option<egui::Color32> {
+    harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+        Shape::Text(shape) if shape.galley.text() == text => shape.galley.job.sections.first().map(|section| section.format.color),
+        _ => None,
+    })
+}
+
+#[test]
+fn titles_and_hints_are_visible_and_drawn_from_the_tokens() {
+    let mut harness = ui_harness(
+        |ui, _: &mut ()| {
+            page_title(ui, "A page", Some("What the page is for"));
+            page_title(ui, "Another page", None);
+            card_title(ui, "A card");
+            hint(ui, "A note");
+        },
+        (),
+    );
+    harness.run();
+    for text in ["A page", "What the page is for", "Another page", "A card", "A note"] {
+        harness.get_by_label(text);
+    }
+    // The title of a screen is a heading for screen readers; the title of a card is not.
+    harness.get_by_role_and_label(Role::Heading, "A page");
+    harness.get_by_role_and_label(Role::Heading, "Another page");
+    assert!(harness.query_by_role_and_label(Role::Heading, "A card").is_none());
+    let t = Tokens::SPORT;
+    assert_eq!(text_colour(&harness, "A note"), Some(t.text_dim), "a hint is secondary text");
+    assert_eq!(text_colour(&harness, "What the page is for"), Some(t.text_dim), "so is the line under a title");
+    assert_eq!(text_colour(&harness, "A page"), Some(t.text));
+    assert_eq!(text_colour(&harness, "A card"), Some(t.text));
+}
+
+#[test]
+fn a_page_title_is_larger_than_a_card_title_and_both_than_body_text() {
+    let mut harness = ui_harness(
+        |ui, _: &mut ()| {
+            page_title(ui, "A page", None);
+            card_title(ui, "A card");
+            ui.label("Body");
+        },
+        (),
+    );
+    harness.run();
+    let height = |label: &str| harness.get_by_label(label).rect().height();
+    assert!(height("A page") > height("A card"), "{} vs {}", height("A page"), height("A card"));
+    assert!(height("A card") > height("Body"), "{} vs {}", height("A card"), height("Body"));
+}
+
+#[test]
+fn a_warning_box_can_hold_more_than_its_text() {
+    let mut harness = ui_harness(
+        |ui, clicks: &mut u32| {
+            let clicked = warning_box_with(ui, "The key expires soon", |ui| secondary_button(ui, "Replace key").clicked());
+            *clicks += u32::from(clicked);
+        },
+        0,
+    );
+    harness.get_by_label("The key expires soon");
+    harness.get_by_role_and_label(Role::Button, "Replace key").click();
+    harness.run();
+    assert_eq!(*harness.state(), 1);
+}

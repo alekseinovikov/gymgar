@@ -8,15 +8,16 @@
 
 use std::time::{Duration, Instant};
 
-use egui::{CentralPanel, Frame, Margin};
+use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, Utc};
+use egui::{CentralPanel, Frame, Margin, ScrollArea};
 use gymgar_domain::{ConnectionStatus, Language};
 use gymgar_engine::{Caller, CommandKind, EngineError, GarminAuthError, GarminStatusView, JobFinished, Outcome, Session, commands};
 use serde_json::Value;
 
 use crate::i18n;
-use crate::state::UiState;
+use crate::state::{Section, UiState};
 use crate::theme::{Tokens, metrics};
-use crate::{rail, tl, widgets};
+use crate::{rail, settings_ui, summary_ui, tl, widgets};
 
 /// How often the window looks at the database for changes another process (the CLI, an agent) has made.
 const STORE_POLL: Duration = Duration::from_secs(1);
@@ -28,15 +29,21 @@ pub struct GymgarApp {
     pub ui: UiState,
     /// The Garmin connection as the engine last reported it; `None` until it could be read.
     status: Option<GarminStatusView>,
-    /// Why the window could not refresh itself from the engine, in the user's language.
+    /// What went wrong that the user should see, in their language: a refresh that failed, or a command with no better
+    /// place to show its failure. The next refresh clears it.
     error: Option<String>,
     /// The interface language the user chose (which may be "system").
     language: Language,
     system_locale: Option<String>,
+    /// The language the window was last drawn in, to notice a change.
+    shown_lang: Option<i18n::Lang>,
+    /// Dates are shown in this offset from UTC; the system's time zone when `None`.
+    utc_offset: Option<FixedOffset>,
     /// Not before this time is the database looked at again.
     pub(crate) next_store_poll: Instant,
-    /// The start-up check of a saved connection has been considered.
-    verify_started: bool,
+    /// The start-up check of a saved connection has been considered. (`pub(crate)` so the screen tests can start from a
+    /// window that has been open a while.)
+    pub(crate) verify_started: bool,
 }
 
 impl GymgarApp {
@@ -55,11 +62,20 @@ impl GymgarApp {
             error: None,
             language: Language::System,
             system_locale,
+            shown_lang: None,
+            utc_offset: None,
             next_store_poll: Instant::now(),
             verify_started: false,
         };
         app.refresh();
         app
+    }
+
+    /// Shows dates in the time zone with this offset from UTC instead of the system's. For tests, which must not depend on
+    /// the machine they run on.
+    pub fn with_utc_offset(mut self, offset: FixedOffset) -> GymgarApp {
+        self.utc_offset = Some(offset);
+        self
     }
 
     /// One frame of the whole interface: the icon rail and the current section. [`eframe::App::ui`] and the UI tests
@@ -70,8 +86,16 @@ impl GymgarApp {
         CentralPanel::default().frame(Frame::new().fill(t.bg).inner_margin(Margin::same(metrics::SCREEN_MARGIN))).show(ui, |ui| {
             if let Some(error) = &self.error {
                 widgets::warning_box(ui, error);
+                ui.add_space(metrics::GAP);
             }
-            // The screen of `self.ui.section` is drawn here; the shell only provides the frame around it.
+            // The window may be low (the minimum is 500 points), so a long screen scrolls.
+            ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                ui.set_max_width(metrics::CONTENT_MAX_WIDTH);
+                match self.ui.section {
+                    Section::Summary => summary_ui::show(self, ui),
+                    Section::Settings => settings_ui::show(self, ui),
+                }
+            });
         });
     }
 
@@ -99,6 +123,9 @@ impl GymgarApp {
         if now >= self.next_store_poll {
             self.next_store_poll = now + STORE_POLL;
             changed |= self.session.store_changed();
+            // A status that could not be read stays unknown until it is asked for again, and the database may not have
+            // changed in between (a lock that lasted too long, say), so nothing else would prompt it.
+            changed |= self.status.is_none();
         }
         if changed {
             self.refresh();
@@ -123,6 +150,25 @@ impl GymgarApp {
         self.language
     }
 
+    /// Whether the engine lets the command `id` run right now. A screen greys the command's button out when it does not,
+    /// and says why in its own words: the engine's reason is English text for agents and logs.
+    pub fn is_enabled(&self, id: &str) -> bool {
+        commands::find(id).is_some_and(|spec| (spec.enabled)(&self.session).is_ok())
+    }
+
+    /// `at` as a date and time on the user's wall clock.
+    pub(crate) fn local_time(&self, at: DateTime<Utc>) -> NaiveDateTime {
+        match self.utc_offset {
+            Some(offset) => at.with_timezone(&offset).naive_local(),
+            None => at.with_timezone(&Local).naive_local(),
+        }
+    }
+
+    /// Tells the user something went wrong that no screen has a place for, in the banner at the top.
+    pub(crate) fn report(&mut self, text: &str) {
+        self.error = Some(text.to_owned());
+    }
+
     fn execute(&mut self, id: &str, params: Value) -> Result<Outcome, EngineError> {
         self.session.execute(id, params, Caller::User).inspect_err(|error| match error {
             // The rejected params may hold what the user typed, so only the command is logged.
@@ -137,7 +183,14 @@ impl GymgarApp {
         match self.session.language() {
             Ok(language) => {
                 self.language = language;
-                i18n::set_current(i18n::resolve(language, self.system_locale.as_deref()));
+                let lang = i18n::resolve(language, self.system_locale.as_deref());
+                // The error of the connect form is kept as text in the language it was made in: in another language
+                // it would be a stale sentence, so it goes.
+                if self.shown_lang.is_some_and(|shown| shown != lang) {
+                    self.ui.connect.error = None;
+                }
+                self.shown_lang = Some(lang);
+                i18n::set_current(lang);
             }
             Err(error) => {
                 log::warn!("cannot read the interface language: {error}");
@@ -181,10 +234,13 @@ impl GymgarApp {
     /// Checks a connection saved by an earlier run, once: one exchange of the key for a token, in the background. What
     /// it finds is shown through the status; a failure here is not an error of the user's.
     fn verify_once(&mut self) {
+        // Without a status there is nothing to decide on: the check is neither done nor forgotten, and the next tick
+        // looks again.
+        let Some(status) = &self.status else { return };
         if std::mem::replace(&mut self.verify_started, true) {
             return;
         }
-        if self.status.as_ref().is_some_and(|status| status.status != ConnectionStatus::NotConnected)
+        if status.status != ConnectionStatus::NotConnected
             && let Err(reason) = self.run("garmin.verify", Value::Null)
         {
             log::info!("the start-up check of the Garmin key did not start: {reason}");

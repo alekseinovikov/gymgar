@@ -5,14 +5,16 @@ use egui::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use gymgar_domain::{ConnectionStatus, Language, SecretBackend};
 use gymgar_engine::testing::{TestConfig, connection_at, save_connection, test_session_on, test_session_with};
-use gymgar_engine::{Caller, EngineError, GarminAuthError, Outcome};
+use gymgar_engine::{Caller, EngineError, GarminAuthError, Outcome, SecretStore};
 use gymgar_store::Store;
+use secrecy::SecretString;
 use serde_json::{Value, json};
 
 use super::*;
 use crate::Section;
 use crate::i18n::{self, Lang};
 use crate::test_support::{TEST_LOCALE, app, harness};
+use crate::theme::metrics;
 
 fn config(garmin: Result<(), GarminAuthError>, deferred: bool) -> TestConfig {
     TestConfig { garmin, deferred, ..TestConfig::default() }
@@ -38,11 +40,11 @@ fn rail_shows_summary_and_settings() {
     harness.get_by_role_and_label(Role::Button, "Settings");
     assert_eq!(harness.state().ui.section, Section::Summary);
 
-    harness.get_by_label("Settings").click();
+    harness.get_by_role_and_label(Role::Button, "Settings").click();
     harness.run();
     assert_eq!(harness.state().ui.section, Section::Settings);
 
-    harness.get_by_label("Summary").click();
+    harness.get_by_role_and_label(Role::Button, "Summary").click();
     harness.run();
     assert_eq!(harness.state().ui.section, Section::Summary);
 }
@@ -51,7 +53,13 @@ fn rail_shows_summary_and_settings() {
 fn the_rail_has_only_two_buttons_summary_on_top_and_settings_at_the_bottom() {
     let (app, _handles) = app(TestConfig::default());
     let harness = harness(app);
-    let buttons: Vec<_> = harness.get_all_by_role(Role::Button).map(|button| (button.accesskit_node().label().unwrap_or_default(), button.rect())).collect();
+    // The buttons of the rail only: the screen beside it has buttons of its own.
+    let rail_edge = metrics::RAIL_WIDTH + 16.0;
+    let buttons: Vec<_> = harness
+        .get_all_by_role(Role::Button)
+        .filter(|button| button.rect().right() < rail_edge)
+        .map(|button| (button.accesskit_node().label().unwrap_or_default(), button.rect()))
+        .collect();
     let labels: Vec<_> = buttons.iter().map(|(label, _)| label.as_str()).collect();
     assert_eq!(labels, ["Summary", "Settings"], "{buttons:?}");
     let (summary, settings) = (buttons[0].1, buttons[1].1);
@@ -66,9 +74,11 @@ fn the_rail_has_only_two_buttons_summary_on_top_and_settings_at_the_bottom() {
 fn the_rail_marks_the_current_section() {
     let (app, _handles) = app(TestConfig::default());
     let mut harness = harness(app);
-    let toggled = |harness: &egui_kittest::Harness<'_, GymgarApp>, label: &str| format!("{:?}", harness.get_by_label(label).accesskit_node().toggled());
+    let toggled = |harness: &egui_kittest::Harness<'_, GymgarApp>, label: &str| {
+        format!("{:?}", harness.get_by_role_and_label(Role::Button, label).accesskit_node().toggled())
+    };
     assert_eq!((toggled(&harness, "Summary").as_str(), toggled(&harness, "Settings").as_str()), ("Some(True)", "Some(False)"));
-    harness.get_by_label("Settings").click();
+    harness.get_by_role_and_label(Role::Button, "Settings").click();
     harness.run();
     assert_eq!((toggled(&harness, "Summary").as_str(), toggled(&harness, "Settings").as_str()), ("Some(False)", "Some(True)"));
 }
@@ -77,20 +87,20 @@ fn the_rail_marks_the_current_section() {
 fn language_switch_relabels() {
     let (app, _handles) = app(TestConfig::default());
     let mut harness = harness(app);
-    harness.get_by_label("Summary");
+    harness.get_by_role_and_label(Role::Button, "Summary");
 
     let outcome = harness.state_mut().run("settings.setLanguage", json!({ "language": "ru" }));
     assert!(matches!(outcome, Ok(Outcome::Done(_))), "{outcome:?}");
     let ctx = harness.ctx.clone();
     harness.state_mut().tick(&ctx);
     harness.run();
-    harness.get_by_label("Сводка");
-    harness.get_by_label("Настройки");
+    harness.get_by_role_and_label(Role::Button, "Сводка");
+    harness.get_by_role_and_label(Role::Button, "Настройки");
     assert!(harness.query_by_label("Summary").is_none());
 
     harness.state_mut().run("settings.setLanguage", json!({ "language": "en" })).expect("switch back");
     harness.run();
-    harness.get_by_label("Summary");
+    harness.get_by_role_and_label(Role::Button, "Summary");
     assert!(harness.query_by_label("Сводка").is_none());
 }
 
@@ -101,7 +111,7 @@ fn the_language_applies_at_once_without_waiting_for_a_tick() {
     harness.state_mut().run("settings.setLanguage", json!({ "language": "ru" })).expect("set the language");
     assert_eq!(i18n::current(), Lang::Ru);
     harness.run();
-    harness.get_by_label("Сводка");
+    harness.get_by_role_and_label(Role::Button, "Сводка");
 }
 
 #[test]
@@ -110,7 +120,7 @@ fn the_system_language_follows_the_system_locale() {
         let (session, _handles) = test_session_with(TestConfig::default());
         let app = GymgarApp::with_system_locale(session, UiState::default(), locale.map(str::to_owned));
         let harness = harness(app);
-        harness.get_by_label(label);
+        harness.get_by_role_and_label(Role::Button, label);
     }
 }
 
@@ -119,12 +129,12 @@ fn a_stored_language_is_in_effect_from_the_first_frame() {
     let (mut session, _handles) = test_session_with(TestConfig::default());
     session.execute("settings.setLanguage", json!({ "language": "ru" }), Caller::User).expect("set the language");
     let harness = harness(GymgarApp::with_system_locale(session, UiState::default(), Some(TEST_LOCALE.to_owned())));
-    harness.get_by_label("Сводка");
+    harness.get_by_role_and_label(Role::Button, "Сводка");
     // An explicit choice beats the locale, in both directions.
     let (mut session, _handles) = test_session_with(TestConfig::default());
     session.execute("settings.setLanguage", json!({ "language": "en" }), Caller::User).expect("set the language");
     let harness = harness_with_locale(session, "ru-RU");
-    harness.get_by_label("Summary");
+    harness.get_by_role_and_label(Role::Button, "Summary");
 }
 
 fn harness_with_locale(session: Session, locale: &str) -> egui_kittest::Harness<'static, GymgarApp> {
@@ -184,6 +194,88 @@ fn tick_checks_a_saved_connection_once_at_start() {
         app.tick(&ctx);
     }
     assert_eq!(spawner.pending(), 0);
+}
+
+#[test]
+fn startup_verify_runs_once_when_connected() {
+    // A saved connection with its key in the store: three ticks queue one job, and it is the check of that key.
+    let (mut connected, handles) = connected_app(config(Ok(()), true));
+    handles.file.set(&SecretString::from("the-saved-key")).expect("save the key");
+    let spawner = handles.spawner.expect("a deferred spawner");
+    let ctx = egui::Context::default();
+    for _ in 0..3 {
+        connected.tick(&ctx);
+    }
+    assert_eq!(spawner.pending(), 1);
+    assert_eq!(handles.garmin.calls(), 0, "the exchange happens in the background job, not on the UI thread");
+    spawner.run_pending();
+    connected.tick(&ctx);
+    assert_eq!((handles.garmin.calls(), handles.garmin.last_key().as_deref()), (1, Some("the-saved-key")));
+    assert_eq!(status_of(&connected), ConnectionStatus::Connected);
+    for _ in 0..3 {
+        connected.tick(&ctx);
+    }
+    assert_eq!((spawner.pending(), handles.garmin.calls()), (0, 1), "once per run of the app");
+
+    // Nothing connected: nothing to check.
+    let (mut empty, handles) = app(config(Ok(()), true));
+    let spawner = handles.spawner.expect("a deferred spawner");
+    for _ in 0..3 {
+        empty.tick(&ctx);
+    }
+    assert_eq!((spawner.pending(), handles.garmin.calls()), (0, 0));
+}
+
+/// A database file holding a saved connection, with the table of the connection renamed away so the status cannot be
+/// read; `restore` puts it back. Returns the app, the doubles, the open directory and the path of the file.
+fn app_with_an_unreadable_status() -> (GymgarApp, gymgar_engine::testing::TestHandles, tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = dir.path().join("gymgar.sqlite3");
+    let cfg = config(Ok(()), true);
+    let (session, handles) = test_session_on(Store::open(&path).expect("open the database"), cfg.clone());
+    save_connection(&session, &connection_at(cfg.now, SecretBackend::File));
+    rusqlite::Connection::open(&path).expect("open the file").execute("ALTER TABLE garmin_connection RENAME TO hidden_connection", []).expect("rename");
+    let app = GymgarApp::with_system_locale(session, UiState::default(), Some(TEST_LOCALE.to_owned()));
+    (app, handles, dir, path)
+}
+
+fn restore(path: &std::path::Path) {
+    rusqlite::Connection::open(path).expect("open the file").execute("ALTER TABLE hidden_connection RENAME TO garmin_connection", []).expect("rename back");
+}
+
+#[test]
+fn startup_verify_waits_until_the_status_can_be_read() {
+    let (mut app, handles, _dir, path) = app_with_an_unreadable_status();
+    let spawner = handles.spawner.expect("a deferred spawner");
+    let ctx = egui::Context::default();
+    assert!(app.status().is_none());
+    // Not being able to read the status is no reason to forget the check: nothing is queued, and it is not marked done.
+    for _ in 0..3 {
+        app.next_store_poll = Instant::now();
+        app.tick(&ctx);
+    }
+    assert!(app.status().is_none());
+    assert_eq!(spawner.pending(), 0);
+
+    // Once the status can be read, the saved connection is checked, once.
+    restore(&path);
+    for _ in 0..3 {
+        app.next_store_poll = Instant::now();
+        app.tick(&ctx);
+    }
+    assert_eq!(status_of(&app), ConnectionStatus::Connected);
+    assert_eq!(spawner.pending(), 1);
+}
+
+#[test]
+fn a_status_that_could_not_be_read_is_read_again_without_waiting_for_a_change() {
+    // The database itself did not change (a lock that lasted too long, say), so nothing tells the window to look again;
+    // it looks again by itself, at the pace of the poll.
+    let (mut app, _handles) = connected_app(config(Ok(()), true));
+    app.status = None;
+    app.tick(&egui::Context::default());
+    assert_eq!(status_of(&app), ConnectionStatus::Connected);
+    assert_eq!(app.error(), None);
 }
 
 #[test]
@@ -379,7 +471,7 @@ fn a_database_that_cannot_be_read_is_reported_in_the_window() {
     harness.get_by_label("Gymgar could not access its data. Check that the disk is available and try again.");
     // The last known status stays, and the rail still works.
     assert!(harness.state().status().is_some());
-    harness.get_by_label("Settings").click();
+    harness.get_by_role_and_label(Role::Button, "Settings").click();
     harness.run();
     assert_eq!(harness.state().ui.section, Section::Settings);
 }

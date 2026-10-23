@@ -5,10 +5,16 @@
 //! Every text the user sees goes through [`tl!`], with its Russian translation in `i18n/ru.tsv`.
 
 mod app;
+mod dates;
+mod garmin_ui;
 pub mod i18n;
 pub mod icons;
 mod rail;
+mod settings_ui;
+#[cfg(test)]
+mod snapshot_tests;
 pub mod state;
+mod summary_ui;
 #[cfg(test)]
 mod test_support;
 pub mod theme;

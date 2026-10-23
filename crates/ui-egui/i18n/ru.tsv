@@ -19,3 +19,69 @@ Gymgar could not access its data. Check that the disk is available and try again
 The value is not valid. Check it and try again.	Значение недопустимо. Проверьте его и попробуйте ещё раз.
 This is not available right now.	Сейчас это недоступно.
 Something went wrong. Please try again.	Что-то пошло не так. Попробуйте ещё раз.
+
+# Summary (spec section 2, items 1, 5 and 9)
+Workouts, progress and recovery will appear here	Здесь появятся тренировки, прогресс и восстановление
+Connect to Garmin Connect	Подключите Garmin Connect
+Gymgar takes your workouts, sleep and HRV from Garmin. You need a personal API key, which takes a couple of minutes.	Gymgar берёт ваши тренировки, сон и ВСР из Garmin. Нужен личный ключ API — это займёт пару минут.
+Connect Garmin	Подключить Garmin
+Garmin is connected. Loading workouts will arrive in the next update.	Garmin подключён. Загрузка тренировок появится в следующем обновлении.
+The Garmin key expires on {}. Create a new one	Ключ Garmin истекает {}. Выпустите новый
+Personal API Key page	Страница Personal API Key
+
+# Settings, the Garmin Connect card (items 2, 4, 6, 7 and 8)
+Garmin Connect	Garmin Connect
+The state of Garmin Connect is not available.	Состояние Garmin Connect недоступно.
+Open the Personal API Key page in Garmin Connect and sign in.	Открыть страницу Personal API Key в Garmin Connect и войти в аккаунт.
+Click Create Key and accept the terms.	Нажать Create Key и принять условия.
+Choose how long the key is valid; 1 year is the most convenient.	Выбрать срок действия; удобнее всего 1 год.
+Click Create and copy the key right away: Garmin shows it only once.	Нажать Create и сразу скопировать ключ: Garmin показывает его один раз.
+Key	Ключ
+Key term	Срок ключа
+30 days	30 дней
+90 days	90 дней
+180 days	180 дней
+1 year	1 год
+as chosen on the website; we will warn you a week before it ends	как выбрали на сайте; предупредим за неделю до конца
+Connect	Подключить
+Cancel	Отмена
+The key is stored in the macOS keychain	Ключ хранится в связке ключей macOS
+The key is stored in the Windows credential manager	Ключ хранится в диспетчере учётных данных Windows
+The key is stored in the system password store	Ключ хранится в хранилище паролей системы
+The key is stored in a file on disk	Ключ хранится в файле на диске
+The system password store is unavailable. Save the key to a file instead? Any program running as you will be able to read it.	Системное хранилище паролей недоступно. Сохранить ключ в файл? Его сможет прочитать любая программа, запущенная от вашего имени.
+Save the key to a file	Сохранить ключ в файл
+Connected	Подключено
+Could not verify	Не удалось проверить
+Key not valid	Ключ не действует
+Key not found	Ключ не найден
+Garmin no longer accepts the saved key: it may have expired or been deleted. Create a new key and enter it below.	Garmin больше не принимает сохранённый ключ: он мог истечь или быть удалён. Выпустите новый ключ и введите его ниже.
+Connect Garmin again	Подключите Garmin заново
+Key valid until {}	Ключ действует до {}
+Verified {}	Проверен {}
+Replace key	Заменить ключ
+Disconnect	Отключить
+Disconnect Garmin? Gymgar will delete the key and the connection details.	Отключить Garmin? Gymgar удалит ключ и сведения о подключении.
+Yes, disconnect	Да, отключить
+A key check is running. Try again in a moment.	Идёт проверка ключа. Попробуйте через минуту.
+Gymgar cannot reach the password store that holds the key, so it cannot disconnect now.	Gymgar не может обратиться к хранилищу паролей, где лежит ключ, поэтому сейчас не может отключить Garmin.
+
+# Settings, the language card (item 10)
+Interface language	Язык интерфейса
+System	Системный
+English	English
+Russian	Русский
+
+# Months, as they stand in a date such as "23 October 2027": the Russian side is the genitive ("23 октября 2027")
+January	января
+February	февраля
+March	марта
+April	апреля
+May	мая
+June	июня
+July	июля
+August	августа
+September	сентября
+October	октября
+November	ноября
+December	декабря
