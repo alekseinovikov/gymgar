@@ -3,6 +3,7 @@ name = "gymgar-sync"
 description = "Two-way sync between the local store and Garmin Connect"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 

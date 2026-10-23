@@ -3,6 +3,7 @@ name = "gymgar-domain"
 description = "Gymgar domain model: exercises, workouts, sets, plans, units (pure data, no I/O)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 

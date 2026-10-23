@@ -3,6 +3,7 @@ name = "gymgar-engine"
 description = "Gymgar engine: Session, command registry, background jobs"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
