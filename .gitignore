@@ -11,3 +11,6 @@ target/
 /secrets
 .env
 *.token
+
+# Brainstorming mockups (superpowers visual companion)
+/.superpowers/
