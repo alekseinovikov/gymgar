@@ -67,11 +67,10 @@ Yes, disconnect	Да, отключить
 A key check is running. Try again in a moment.	Идёт проверка ключа. Попробуйте через минуту.
 Gymgar cannot reach the password store that holds the key, so it cannot disconnect now.	Gymgar не может обратиться к хранилищу паролей, где лежит ключ, поэтому сейчас не может отключить Garmin.
 
-# Settings, the language card (item 10)
+# Settings, the language card (item 10). "English" and "Русский" are not here: a language is named in itself, in every
+# interface language, so the list never translates them.
 Interface language	Язык интерфейса
 System	Системный
-English	English
-Russian	Русский
 
 # Months, as they stand in a date such as "23 October 2027": the Russian side is the genitive ("23 октября 2027")
 January	января

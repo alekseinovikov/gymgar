@@ -8,6 +8,10 @@ use serde_json::Value;
 use crate::theme::metrics;
 use crate::{GymgarApp, garmin_ui, tl, widgets};
 
+/// The names of the languages in themselves.
+const ENGLISH: &str = "English";
+const RUSSIAN: &str = "Русский";
+
 /// Draws the Settings screen.
 pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
     widgets::page_title(ui, tl!("Settings"), None);
@@ -25,7 +29,9 @@ fn language_card(app: &mut GymgarApp, ui: &mut Ui) {
             widgets::card_title(ui, tl!("Interface language"));
             ui.add_space(metrics::GAP);
             let mut choice = app.language();
-            let choices = [(Language::System, tl!("System")), (Language::En, tl!("English")), (Language::Ru, tl!("Russian"))];
+            // Each language is named in itself (its endonym), in every interface language, so a user who cannot read the
+            // current one still finds their own. Being the same everywhere, the names are not translated.
+            let choices = [(Language::System, tl!("System")), (Language::En, ENGLISH), (Language::Ru, RUSSIAN)];
             if widgets::dropdown(ui, Id::unique("interface-language"), &mut choice, &choices) {
                 let params = Map::from_iter([("language".to_owned(), Value::from(choice.as_str()))]);
                 match app.run("settings.setLanguage", Value::Object(params)) {

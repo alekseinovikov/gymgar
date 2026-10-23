@@ -54,7 +54,7 @@ pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
             return;
         };
         let connected = matches!(status.status, ConnectionStatus::Connected | ConnectionStatus::Unverified);
-        if !connected {
+        if status.status == ConnectionStatus::NotConnected {
             // Nothing is left to disconnect, so a question about it must not come back armed with the next connection.
             app.ui.connect.confirm_disconnect = false;
         }
@@ -63,6 +63,9 @@ pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
             actions(app, ui, &status);
         } else {
             connect_form(app, ui, &t, &status);
+            if !connected && status.status != ConnectionStatus::NotConnected {
+                broken_key_actions(app, ui, &status);
+            }
         }
         if let Some(error) = app.ui.connect.error.clone() {
             ui.add_space(metrics::GAP);
@@ -142,17 +145,7 @@ fn state_lines(app: &mut GymgarApp, ui: &mut Ui, t: &Tokens, status: &GarminStat
 fn actions(app: &mut GymgarApp, ui: &mut Ui, status: &GarminStatusView) {
     ui.add_space(metrics::GAP);
     if app.ui.connect.confirm_disconnect {
-        ui.label(tl!("Disconnect Garmin? Gymgar will delete the key and the connection details."));
-        let (mut confirmed, mut cancelled) = (false, false);
-        ui.horizontal(|ui| {
-            confirmed = widgets::secondary_button(ui, tl!("Yes, disconnect")).clicked();
-            cancelled = widgets::secondary_button(ui, tl!("Cancel")).clicked();
-        });
-        if confirmed {
-            disconnect(app);
-        } else if cancelled {
-            app.ui.connect.confirm_disconnect = false;
-        }
+        confirm_disconnect(app, ui);
         return;
     }
     // The engine says whether the key can be removed right now; the card says why not, in the user's language.
@@ -160,23 +153,70 @@ fn actions(app: &mut GymgarApp, ui: &mut Ui, status: &GarminStatusView) {
     let (mut replace, mut ask) = (false, false);
     ui.horizontal(|ui| {
         replace = widgets::secondary_button(ui, tl!("Replace key")).clicked();
-        ask = ui.add_enabled_ui(can_disconnect, |ui| widgets::secondary_button(ui, tl!("Disconnect"))).inner.clicked();
+        ask = disconnect_button(ui, can_disconnect);
     });
     if !can_disconnect {
-        widgets::hint(
-            ui,
-            if status.check_running {
-                tl!("A key check is running. Try again in a moment.")
-            } else {
-                tl!("Gymgar cannot reach the password store that holds the key, so it cannot disconnect now.")
-            },
-        );
+        why_disconnect_is_unavailable(ui, status);
     }
     if replace {
         replace_key(app);
     } else if ask {
-        app.ui.connect.confirm_disconnect = true;
-        app.ui.connect.error = None;
+        ask_to_disconnect(app);
+    }
+}
+
+/// Under the form of a connection whose key does not work or is gone: the form replaces the key, and this removes the
+/// connection altogether, after the same confirmation as for a connection that works.
+fn broken_key_actions(app: &mut GymgarApp, ui: &mut Ui, status: &GarminStatusView) {
+    ui.add_space(metrics::GAP);
+    if app.ui.connect.confirm_disconnect {
+        confirm_disconnect(app, ui);
+        return;
+    }
+    let can_disconnect = app.is_enabled("garmin.disconnect");
+    if disconnect_button(ui, can_disconnect) {
+        ask_to_disconnect(app);
+    }
+    if !can_disconnect {
+        why_disconnect_is_unavailable(ui, status);
+    }
+}
+
+/// The "Disconnect" button, greyed out unless `enabled`; whether it was clicked.
+fn disconnect_button(ui: &mut Ui, enabled: bool) -> bool {
+    ui.add_enabled_ui(enabled, |ui| widgets::secondary_button(ui, tl!("Disconnect"))).inner.clicked()
+}
+
+/// Why "Disconnect" is greyed out: a key check holds the connection, or the key's store cannot be reached.
+fn why_disconnect_is_unavailable(ui: &mut Ui, status: &GarminStatusView) {
+    widgets::hint(
+        ui,
+        if status.check_running {
+            tl!("A key check is running. Try again in a moment.")
+        } else {
+            tl!("Gymgar cannot reach the password store that holds the key, so it cannot disconnect now.")
+        },
+    );
+}
+
+/// The first click on "Disconnect" only asks.
+fn ask_to_disconnect(app: &mut GymgarApp) {
+    app.ui.connect.confirm_disconnect = true;
+    app.ui.connect.error = None;
+}
+
+/// The question before the key and the connection go, with its two answers.
+fn confirm_disconnect(app: &mut GymgarApp, ui: &mut Ui) {
+    ui.label(tl!("Disconnect Garmin? Gymgar will delete the key and the connection details."));
+    let (mut confirmed, mut cancelled) = (false, false);
+    ui.horizontal(|ui| {
+        confirmed = widgets::secondary_button(ui, tl!("Yes, disconnect")).clicked();
+        cancelled = widgets::secondary_button(ui, tl!("Cancel")).clicked();
+    });
+    if confirmed {
+        disconnect(app);
+    } else if cancelled {
+        app.ui.connect.confirm_disconnect = false;
     }
 }
 
@@ -228,7 +268,8 @@ fn connect_form(app: &mut GymgarApp, ui: &mut Ui, t: &Tokens, status: &GarminSta
         if busy {
             ui.add(egui::Spinner::new().size(metrics::SPINNER_SIZE));
         }
-        if app.ui.connect.replacing {
+        // Only a working connection has a card to go back to; for a key that does not work the form is the card.
+        if app.ui.connect.replacing && matches!(status.status, ConnectionStatus::Connected | ConnectionStatus::Unverified) {
             cancel = ui.add_enabled_ui(!pending, |ui| widgets::secondary_button(ui, tl!("Cancel"))).inner.clicked();
         }
         if let Some(backend) = status.new_key_backend {

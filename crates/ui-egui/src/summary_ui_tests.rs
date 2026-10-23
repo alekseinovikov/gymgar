@@ -65,11 +65,23 @@ fn connected_summary_text() {
 }
 
 #[test]
-fn a_key_that_could_not_be_checked_still_shows_the_connected_text() {
+fn a_key_that_could_not_be_checked_shows_the_connected_text_marked() {
+    // Design spec §2, item 8: the last known state, with the mark that the check got no answer.
     for lang in Lang::ALL {
         let cfg = TestConfig::default();
         let (app, _handles) = app_connected(lang, cfg.clone(), &with_status(&cfg, ConnectionStatus::Unverified));
-        harness(app).get_by_label(pick(lang, CONNECTED_TEXT.0, CONNECTED_TEXT.1));
+        let harness = harness(app);
+        harness.get_by_label(pick(lang, CONNECTED_TEXT.0, CONNECTED_TEXT.1));
+        harness.get_by_label(pick(lang, "Could not verify", "Не удалось проверить"));
+    }
+}
+
+#[test]
+fn a_key_checked_with_success_has_no_mark() {
+    for lang in Lang::ALL {
+        let cfg = TestConfig::default();
+        let (app, _handles) = app_connected(lang, cfg.clone(), &working_connection(&cfg));
+        assert!(harness(app).query_by_label(pick(lang, "Could not verify", "Не удалось проверить")).is_none(), "{lang:?}");
     }
 }
 

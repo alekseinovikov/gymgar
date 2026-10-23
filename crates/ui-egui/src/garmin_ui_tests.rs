@@ -464,6 +464,8 @@ fn key_missing_and_rejected_states_render() {
         harness.get_by_role(Role::Link);
         harness.get_by_role(Role::PasswordInput);
         harness.get_by_role_and_label(Role::Button, connect_label(lang));
+        // The connection can also simply be removed.
+        assert!(button_enabled(&harness, pick(lang, "Disconnect", "Отключить")), "{lang:?}");
         assert!(harness.query_by_label(pick(lang, "Connected", "Подключено")).is_none(), "{lang:?}");
         assert!(harness.query_by_label_contains(pick(lang, "Key valid until", "Ключ действует до")).is_none(), "{lang:?}");
 
@@ -474,6 +476,7 @@ fn key_missing_and_rejected_states_render() {
         harness.get_by_role(Role::Link);
         harness.get_by_role(Role::PasswordInput);
         harness.get_by_role_and_label(Role::Button, connect_label(lang));
+        assert!(button_enabled(&harness, pick(lang, "Disconnect", "Отключить")), "{lang:?}");
         assert!(harness.query_by_label(pick(lang, "Connected", "Подключено")).is_none(), "{lang:?}");
 
         // The key could not be checked (no network): the last known state, marked, with the buttons of a connection.
@@ -606,6 +609,92 @@ fn disconnect_asks_confirmation() {
         assert!(!harness.state().ui.connect.confirm_disconnect, "{lang:?}");
         harness.get_by_role(Role::PasswordInput);
         assert!(harness.query_by_label(pick(lang, "Connected", "Подключено")).is_none(), "{lang:?}");
+    }
+}
+
+#[test]
+fn a_connection_whose_key_does_not_work_can_be_disconnected_after_a_confirmation() {
+    for lang in Lang::ALL {
+        for status in [ConnectionStatus::KeyRejected, ConnectionStatus::KeyMissing] {
+            let cfg = TestConfig::default();
+            let (mut harness, handles) = settings_connected(lang, &cfg, &with_status(&cfg, status));
+            if status == ConnectionStatus::KeyRejected {
+                handles.file.set(&SecretString::from("the-refused-key")).expect("save the refused key");
+            }
+
+            // The first click only asks, and "Cancel" backs out.
+            click(&mut harness, pick(lang, "Disconnect", "Отключить"));
+            harness.get_by_label(pick(
+                lang,
+                "Disconnect Garmin? Gymgar will delete the key and the connection details.",
+                "Отключить Garmin? Gymgar удалит ключ и сведения о подключении.",
+            ));
+            click(&mut harness, pick(lang, "Cancel", "Отмена"));
+            assert!(harness.query_by_label_contains(pick(lang, "Disconnect Garmin?", "Отключить Garmin?")).is_none(), "{lang:?} {status:?}");
+            assert_eq!(status_of(&harness), status, "{lang:?}: nothing changed");
+
+            // Confirming removes the connection (and a key, if one is left), and the card offers to connect anew.
+            click(&mut harness, pick(lang, "Disconnect", "Отключить"));
+            click(&mut harness, pick(lang, "Yes, disconnect", "Да, отключить"));
+            harness.run();
+            assert_eq!(status_of(&harness), ConnectionStatus::NotConnected, "{lang:?} {status:?}");
+            assert_eq!(stored_key(&handles.file), None, "{lang:?} {status:?}");
+            assert!(!harness.state().ui.connect.confirm_disconnect, "{lang:?} {status:?}");
+            harness.get_by_role(Role::PasswordInput);
+            assert!(harness.query_by_role_and_label(Role::Button, pick(lang, "Disconnect", "Отключить")).is_none(), "{lang:?} {status:?}");
+            assert!(harness.query_by_label(pick(lang, "Key not valid", "Ключ не действует")).is_none(), "{lang:?} {status:?}");
+            assert!(harness.query_by_label(pick(lang, "Key not found", "Ключ не найден")).is_none(), "{lang:?} {status:?}");
+        }
+    }
+}
+
+#[test]
+fn the_form_of_a_key_that_does_not_work_has_no_cancel_of_its_own() {
+    // Summary's "Replace key" opens the form in replacing mode. For a key that does not work the form is all there is,
+    // so there is nothing to go back to, and the one "Cancel" on the card is the one of the question.
+    for lang in Lang::ALL {
+        let cfg = TestConfig::default();
+        let (mut harness, _handles) = settings_connected(lang, &cfg, &with_status(&cfg, ConnectionStatus::KeyRejected));
+        harness.state_mut().ui.connect.replacing = true;
+        harness.run();
+        assert!(harness.query_by_role_and_label(Role::Button, pick(lang, "Cancel", "Отмена")).is_none(), "{lang:?}");
+        click(&mut harness, pick(lang, "Disconnect", "Отключить"));
+        assert_eq!(harness.get_all_by_role_and_label(Role::Button, pick(lang, "Cancel", "Отмена")).count(), 1, "{lang:?}");
+        click(&mut harness, pick(lang, "Cancel", "Отмена"));
+        assert!(!harness.state().ui.connect.confirm_disconnect, "{lang:?}");
+    }
+}
+
+#[test]
+fn disconnecting_a_missing_key_is_greyed_out_with_the_reason_when_its_store_is_out_of_reach() {
+    for lang in Lang::ALL {
+        // The key was kept in the system store, which this session does not have.
+        let cfg = TestConfig { system_store: false, ..TestConfig::default() };
+        let connection = GarminConnection { last_status: ConnectionStatus::KeyMissing, ..connection_at(cfg.now, SecretBackend::System) };
+        let (harness, _handles) = settings_connected(lang, &cfg, &connection);
+        assert!(!button_enabled(&harness, pick(lang, "Disconnect", "Отключить")), "{lang:?}");
+        harness.get_by_label(pick(
+            lang,
+            "Gymgar cannot reach the password store that holds the key, so it cannot disconnect now.",
+            "Gymgar не может обратиться к хранилищу паролей, где лежит ключ, поэтому сейчас не может отключить Garmin.",
+        ));
+        // Connecting again still works.
+        harness.get_by_role(Role::PasswordInput);
+    }
+}
+
+#[test]
+fn disconnecting_a_rejected_key_is_greyed_out_while_a_check_runs() {
+    for lang in Lang::ALL {
+        let cfg = TestConfig { deferred: true, ..TestConfig::default() };
+        let (app, _handles) = app_just_opened(lang, cfg.clone(), &with_status(&cfg, ConnectionStatus::KeyRejected));
+        let mut harness = harness_at(app, Section::Settings);
+        assert!(button_enabled(&harness, pick(lang, "Disconnect", "Отключить")), "{lang:?}");
+        // The start-up check is under way.
+        tick(&mut harness);
+        assert!(harness.state().status().is_some_and(|status| status.check_running), "{lang:?}");
+        assert!(!button_enabled(&harness, pick(lang, "Disconnect", "Отключить")), "{lang:?}");
+        harness.get_by_label(pick(lang, "A key check is running. Try again in a moment.", "Идёт проверка ключа. Попробуйте через минуту."));
     }
 }
 

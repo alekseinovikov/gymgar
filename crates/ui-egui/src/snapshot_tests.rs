@@ -119,6 +119,9 @@ fn render_snapshots() {
             let (app, _handles) = app_connected(lang, cfg.clone(), &connection);
             save(&mut window(app, Section::Settings), &directory, name, lang);
         }
+        let connection = GarminConnection { last_status: ConnectionStatus::Unverified, ..working_connection(&cfg) };
+        let (app, _handles) = app_connected(lang, cfg.clone(), &connection);
+        save(&mut window(app, Section::Summary), &directory, "summary-unverified", lang);
 
         // 6. No system password store: the warning that names the file, and the consent box. A path as long as a real one on
         // macOS, and a long Windows one that has no spaces to break at.

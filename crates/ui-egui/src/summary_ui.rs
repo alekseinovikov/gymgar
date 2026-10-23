@@ -17,7 +17,7 @@ pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
     match status.status {
         ConnectionStatus::NotConnected => invitation(app, ui),
         ConnectionStatus::Connected | ConnectionStatus::Unverified => {
-            connected(ui);
+            connected(ui, status.status == ConnectionStatus::Unverified);
             if status.expiry_warning {
                 ui.add_space(metrics::GAP);
                 garmin_ui::expiry_warning(app, ui, true);
@@ -44,12 +44,17 @@ fn invitation(app: &mut GymgarApp, ui: &mut Ui) {
     });
 }
 
-/// A connection that works. Loading the workouts is the next project, and the card says so.
-fn connected(ui: &mut Ui) {
+/// A connection that works. Loading the workouts is the next project, and the card says so. `unverified`: the last check
+/// got no answer from Garmin, so this is the last known state, and it is marked as such (spec section 2, item 8).
+fn connected(ui: &mut Ui, unverified: bool) {
+    let t = Tokens::get(ui.ctx());
     widgets::card(ui, |ui| {
         widgets::card_title(ui, tl!("Garmin Connect"));
         ui.add_space(metrics::GAP / 2.0);
         ui.label(tl!("Garmin is connected. Loading workouts will arrive in the next update."));
+        if unverified {
+            ui.colored_label(t.warning, tl!("Could not verify"));
+        }
     });
 }
 

@@ -9,9 +9,10 @@ use crate::i18n::{self, Lang};
 use crate::test_support::{app_in, harness_at, pick};
 use crate::{GymgarApp, Section, UiState};
 
-/// The three choices of the language list, as `lang` spells them.
+/// The three choices of the language list, as `lang` spells them. A language is named in itself, whatever the language
+/// of the window: someone who reads only Russian finds «Русский» in an English window.
 fn choices(lang: Lang) -> [&'static str; 3] {
-    [pick(lang, "System", "Системный"), pick(lang, "English", "English"), pick(lang, "Russian", "Русский")]
+    [pick(lang, "System", "Системный"), "English", "Русский"]
 }
 
 #[test]
@@ -52,7 +53,7 @@ fn choosing_a_language_applies_at_once_and_is_kept_by_the_engine() {
 
     harness.get_by_role_and_label(Role::ComboBox, "System").click();
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "Russian").click();
+    harness.get_by_role_and_label(Role::Button, "Русский").click();
     harness.run();
     assert_eq!(harness.state().language(), Language::Ru);
     assert_eq!(i18n::current(), Lang::Ru);
@@ -107,7 +108,7 @@ fn a_language_that_cannot_be_saved_is_reported_in_the_banner() {
 
     harness.get_by_role_and_label(Role::ComboBox, "System").click();
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "Russian").click();
+    harness.get_by_role_and_label(Role::Button, "Русский").click();
     harness.run();
     harness.get_by_label("Gymgar could not access its data. Check that the disk is available and try again.");
     assert_eq!(harness.state().language(), Language::System, "the choice was not saved, so it is not in effect");
