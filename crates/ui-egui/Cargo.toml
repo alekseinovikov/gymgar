@@ -11,8 +11,28 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+gymgar-domain = { workspace = true }
+gymgar-engine = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
+egui_extras = { workspace = true }
+# Dates on the Garmin screens are shown in the user's time zone.
+chrono = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sys-locale = { workspace = true }
 
 [dev-dependencies]
-egui_kittest = { workspace = true }
+# `gymgar-engine/testing` carries the fake Garmin, the in-memory secret stores and the deferred spawner.
+gymgar-engine = { workspace = true, features = ["testing"] }
+# `wgpu` and `snapshot` render the screens to PNG for the manual snapshot test; the headless tests need no GPU.
+# `eframe` runs the real app (its `logic` and `ui`) in the harness, so the PNG has no frame of the harness's own.
+egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
+image = { workspace = true }
+# Two connections to one database file (another process changing a setting) and a database damaged on purpose.
+gymgar-store = { workspace = true }
+rusqlite = { workspace = true }
+tempfile = { workspace = true }
+# A key put into a test secret store directly, to stand for the key an earlier run saved.
+secrecy = { workspace = true }

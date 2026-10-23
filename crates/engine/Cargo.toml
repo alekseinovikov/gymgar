@@ -9,3 +9,26 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# Test doubles (in-memory secret stores, a fake Garmin, inline and deferred spawners) for the tests of crates built on
+# the engine. Apps never enable it.
+testing = []
+
+[dependencies]
+gymgar-domain = { workspace = true }
+gymgar-store = { workspace = true }
+# `serde`: `garmin.status` reports dates in its JSON answer.
+chrono = { workspace = true, features = ["serde"] }
+futures = { workspace = true }
+log = { workspace = true }
+schemars = { workspace = true }
+secrecy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# A file database shared by two connections, and raw SQL to plant a damaged setting.
+rusqlite = { workspace = true }
+tempfile = { workspace = true }

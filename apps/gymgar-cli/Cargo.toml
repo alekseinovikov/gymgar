@@ -1,0 +1,26 @@
+[package]
+name = "gymgar-cli"
+description = "Gymgar command line: the headless MCP server for agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gymgar-automation = { workspace = true }
+gymgar-engine = { workspace = true }
+gymgar-store = { workspace = true }
+# The session's clock.
+chrono = { workspace = true }
+thiserror = { workspace = true }
+# One multi-thread runtime for the MCP server; it is built by hand, since `#[tokio::main]` panics when that fails.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+# A throwaway home directory, so the end-to-end test never touches the real data directory.
+tempfile = { workspace = true }

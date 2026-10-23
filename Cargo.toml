@@ -14,6 +14,7 @@ publish = false
 # internal
 gymgar-domain = { path = "crates/domain" }
 gymgar-garmin = { path = "crates/garmin" }
+gymgar-secrets = { path = "crates/secrets" }
 gymgar-store = { path = "crates/store" }
 gymgar-sync = { path = "crates/sync" }
 gymgar-engine = { path = "crates/engine" }
@@ -23,11 +24,41 @@ gymgar-automation = { path = "crates/automation" }
 # external
 eframe = { version = "0.37", features = ["persistence"] }
 egui = "0.37"
+# SVG icons: `install_image_loaders` only handles `.svg` with the `svg` feature; the defaults only add the `file://` loader.
+egui_extras = { version = "0.37", default-features = false, features = ["svg"] }
 egui_kittest = "0.37"
+# Writes the snapshot test's screenshots as PNG (the version egui_kittest already uses).
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Resolves the "System" interface language to the OS locale.
+sys-locale = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 log = "0.4"
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+# System secret store (Keychain / Credential Manager / Secret Service) for the Garmin API key.
+keyring = "4.2"
+# Secrets never reach Debug/Display/logs; `serde` lets other crates deserialize them (never serialize).
+secrecy = { version = "0.10", features = ["serde"] }
+tempfile = "3"
+# HTTP client for the Garmin APIs (rustls by default). Add features only when a call needs them.
+reqwest = "0.13"
+# Garmin calls run off the UI thread; every crate enables just the tokio features it uses.
+tokio = { version = "1.54", default-features = false }
+# Decodes the JWT payload in garmin::personal::jwt.
+base64 = "0.23"
+# Local mock server for Garmin API tests (tests never reach the real Garmin).
+wiremock = "0.6"
+# SQLite for gymgar-store; `bundled` compiles SQLite into the app so it never depends on a system library.
+rusqlite = { version = "0.40", features = ["bundled"] }
+# Per-OS user data directory (where the database and the file secret store live).
+directories = "6"
+# JSON Schema of command parameters: the same schema feeds MCP `inputSchema`, docs and UI forms.
+schemars = "1.2"
+# Background jobs are boxed futures run on an injected spawner; `executor` runs them inline in engine test doubles.
+futures = "0.3"
+# Official MCP SDK for gymgar-automation. Crates enable only the features they use (`server`, `transport-io`; `client` in tests).
+rmcp = { version = "3.7", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

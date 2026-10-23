@@ -9,3 +9,23 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+gymgar-engine = { workspace = true }
+log = { workspace = true }
+# `server` is the ServerHandler API, `transport-io` the stdio transport. The tools are written by hand, so no `macros`.
+rmcp = { workspace = true, features = ["server", "transport-io"] }
+# The two tools' argument structs derive their `inputSchema`.
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# `spawn_blocking` runs commands off the async threads.
+tokio = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+# Test session on an in-memory database with fake secret stores and Garmin.
+gymgar-engine = { workspace = true, features = ["testing"] }
+# An in-process MCP client talks to the server over `tokio::io::duplex`.
+rmcp = { workspace = true, features = ["client"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }

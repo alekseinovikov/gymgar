@@ -1,0 +1,94 @@
+# Russian translations of the interface. One `English<TAB>Russian` pair per line; `#` starts a comment line.
+# The English side is the literal inside `tl!(...)` in the sources, character for character. A `{}` stands for a value
+# filled in at run time and must appear on both sides. A test fails when a `tl!` literal has no line here.
+
+# Navigation
+Summary	Сводка
+Settings	Настройки
+
+# Why a command failed (spec section 2, item 3, for the Garmin failures)
+Garmin did not accept the key. Check that it was copied in full, or create a new one.	Garmin не принял ключ. Проверьте, что он скопирован целиком, или создайте новый.
+Could not reach Garmin. Check your internet connection.	Не удалось связаться с Garmin. Проверьте подключение к интернету.
+Garmin has temporarily limited requests. Try again in a few minutes.	Garmin временно ограничил запросы. Попробуйте через несколько минут.
+Garmin is unavailable right now. Try again later.	Garmin сейчас недоступен. Попробуйте позже.
+The system password store is unavailable. Allow saving the key to a file to continue.	Системное хранилище паролей недоступно. Разрешите сохранить ключ в файл, чтобы продолжить.
+Garmin Connect is not connected.	Garmin Connect не подключён.
+The Garmin key was not found in the password store. Connect Garmin again.	Ключ Garmin не найден в хранилище паролей. Подключите Garmin заново.
+Gymgar could not use the password store. Check that it is unlocked and try again.	Gymgar не смог обратиться к хранилищу паролей. Проверьте, что оно разблокировано, и попробуйте ещё раз.
+Gymgar could not access its data. Check that the disk is available and try again.	Gymgar не смог получить доступ к своим данным. Проверьте, что диск доступен, и попробуйте ещё раз.
+The value is not valid. Check it and try again.	Значение недопустимо. Проверьте его и попробуйте ещё раз.
+This is not available right now.	Сейчас это недоступно.
+Something went wrong. Please try again.	Что-то пошло не так. Попробуйте ещё раз.
+
+# Summary (spec section 2, items 1, 5 and 9)
+Workouts, progress and recovery will appear here	Здесь появятся тренировки, прогресс и восстановление
+Connect to Garmin Connect	Подключите Garmin Connect
+Gymgar takes your workouts, sleep and HRV from Garmin. You need a personal API key, which takes a couple of minutes.	Gymgar берёт ваши тренировки, сон и ВСР из Garmin. Нужен личный ключ API — это займёт пару минут.
+Connect Garmin	Подключить Garmin
+Garmin is connected. Loading workouts will arrive in the next update.	Garmin подключён. Загрузка тренировок появится в следующем обновлении.
+The Garmin key expires on {}. Create a new one	Ключ Garmin истекает {}. Выпустите новый
+Personal API Key page	Страница Personal API Key
+
+# Settings, the Garmin Connect card (items 2, 4, 6, 7 and 8)
+Garmin Connect	Garmin Connect
+The state of Garmin Connect is not available.	Состояние Garmin Connect недоступно.
+Open the Personal API Key page in Garmin Connect and sign in.	Открыть страницу Personal API Key в Garmin Connect и войти в аккаунт.
+Click Create Key and accept the terms.	Нажать Create Key и принять условия.
+Choose how long the key is valid; 1 year is the most convenient.	Выбрать срок действия; удобнее всего 1 год.
+Click Create and copy the key right away: Garmin shows it only once.	Нажать Create и сразу скопировать ключ: Garmin показывает его один раз.
+Key	Ключ
+Key term	Срок ключа
+30 days	30 дней
+90 days	90 дней
+180 days	180 дней
+1 year	1 год
+as chosen on the website; we will warn you a week before it ends	как выбрали на сайте; предупредим за неделю до конца
+Connect	Подключить
+Cancel	Отмена
+The key is stored in the macOS keychain	Ключ хранится в связке ключей macOS
+The key is stored in the Windows credential manager	Ключ хранится в диспетчере учётных данных Windows
+The key is stored in the system password store	Ключ хранится в хранилище паролей системы
+The key is stored in a file on disk	Ключ хранится в файле на диске
+The system password store is unavailable. Save the key to the file {}? Any program running as you will be able to read it.	Системное хранилище паролей недоступно. Сохранить ключ в файл {}? Его сможет прочитать любая программа, запущенная от вашего имени.
+The system password store is unavailable. Save the key to a file instead? Any program running as you will be able to read it.	Системное хранилище паролей недоступно. Сохранить ключ в файл? Его сможет прочитать любая программа, запущенная от вашего имени.
+Save the key to a file	Сохранить ключ в файл
+Connected	Подключено
+Could not verify	Не удалось проверить
+Key not valid	Ключ не действует
+Key not found	Ключ не найден
+Garmin no longer accepts the saved key: it may have expired or been deleted. Create a new key and enter it below.	Garmin больше не принимает сохранённый ключ: он мог истечь или быть удалён. Выпустите новый ключ и введите его ниже.
+Connect Garmin again	Подключите Garmin заново
+Key valid until {}	Ключ действует до {}
+Verified {}	Проверен {}
+Replace key	Заменить ключ
+Disconnect	Отключить
+Disconnect Garmin? Gymgar will delete the key and the connection details.	Отключить Garmin? Gymgar удалит ключ и сведения о подключении.
+Yes, disconnect	Да, отключить
+A key check is running. Try again in a moment.	Идёт проверка ключа. Попробуйте через минуту.
+Gymgar cannot reach the password store that holds the key, so it cannot disconnect now.	Gymgar не может обратиться к хранилищу паролей, где лежит ключ, поэтому сейчас не может отключить Garmin.
+
+# Settings, the language card (item 10). "English" and "Русский" are not here: a language is named in itself, in every
+# interface language, so the list never translates them.
+Interface language	Язык интерфейса
+System	Системный
+
+# Months, as they stand in a date such as "23 October 2027": the Russian side is the genitive ("23 октября 2027")
+January	января
+February	февраля
+March	марта
+April	апреля
+May	мая
+June	июня
+July	июля
+August	августа
+September	сентября
+October	октября
+November	ноября
+December	декабря
+
+# The window shown when Gymgar cannot start
+Gymgar cannot start	Gymgar не может запуститься
+Gymgar could not open its data. Check that the disk is available and the file is not damaged, then start Gymgar again.	Gymgar не смог открыть свои данные. Проверьте, что диск доступен, а файл не повреждён, и запустите Gymgar снова.
+Start Gymgar again. If the problem remains, report the error below.	Запустите Gymgar снова. Если проблема останется, сообщите об ошибке ниже.
+Details	Подробности
+File	Файл

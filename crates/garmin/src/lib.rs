@@ -10,3 +10,8 @@
 //! Standalone: depends on no workspace crate. It speaks Garmin's own data model (DTOs that mirror
 //! Garmin's JSON, unknown fields kept verbatim). Mapping to `gymgar-domain` lives in `gymgar-sync`.
 //! Keys, tokens and passwords never appear in logs or error messages.
+
+mod error;
+pub mod personal;
+
+pub use error::GarminError;
