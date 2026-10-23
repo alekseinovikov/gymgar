@@ -7,10 +7,10 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -78,9 +78,26 @@ fn serves_the_two_tools_and_runs_commands_over_stdio() {
 
     // The client goes away: the server ends cleanly.
     drop(stdin);
-    let status = child.wait().expect("wait for gymgar-cli");
+    let status = wait_for_exit(&mut child);
     assert!(status.success(), "{status}");
     assert!(contains_file(home.path(), "gymgar.sqlite3"), "the database should be created under the temporary home");
+}
+
+/// Waits for `child` to exit, but not for ever: a server that keeps running after its client has gone is killed, and the
+/// test fails instead of hanging the run.
+fn wait_for_exit(child: &mut Child) -> ExitStatus {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        if let Some(status) = child.try_wait().expect("check whether gymgar-cli has exited") {
+            return status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("gymgar-cli did not exit within {TIMEOUT:?} after its client went away");
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn contains_file(dir: &Path, name: &str) -> bool {

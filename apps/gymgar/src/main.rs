@@ -19,6 +19,9 @@ use gymgar_ui_egui::{GymgarApp, StartupErrorApp, UiState, icons, theme};
 /// Threads of the runtime that drives the Garmin requests. A request is short and rare, so two are plenty.
 const WORKER_THREADS: usize = 2;
 
+/// The file eframe keeps the window's state in, inside the data directory.
+const UI_STATE_FILE: &str = "app.ron";
+
 /// How long closing the window waits for a job that is still running (a keychain prompt nobody answered, say) before it
 /// gives up on it. Dropping the runtime would wait for ever.
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
@@ -76,6 +79,7 @@ fn open_store(data_dir: Result<PathBuf, StoreError>) -> Result<(PathBuf, Store),
 fn run_app(data_dir: &Path, store: Store, runtime: &tokio::runtime::Runtime) -> eframe::Result {
     let options = NativeOptions {
         viewport: ViewportBuilder::default().with_title("Gymgar").with_app_id("gymgar").with_inner_size([1200.0, 800.0]).with_min_inner_size([800.0, 500.0]),
+        persistence_path: Some(ui_state_path(data_dir)),
         ..Default::default()
     };
     eframe::run_native(
@@ -89,6 +93,13 @@ fn run_app(data_dir: &Path, store: Store, runtime: &tokio::runtime::Runtime) -> 
             Ok(Box::new(GymgarApp::new(session, UiState::load(cc.storage))))
         }),
     )
+}
+
+/// Where eframe keeps the window's size and the UI state between runs: in the data directory, next to the database.
+/// eframe's own default is a directory named after the app id, which is the release data directory even for a debug
+/// build, so a developer's window would share (and overwrite) the state of the installed app.
+fn ui_state_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(UI_STATE_FILE)
 }
 
 /// A window with one screen: why Gymgar cannot start.
@@ -117,6 +128,12 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    #[test]
+    fn the_window_state_lives_in_the_data_directory() {
+        let data_dir = Path::new("data").join("Gymgar Dev");
+        assert_eq!(ui_state_path(&data_dir), data_dir.join("app.ron"));
+    }
 
     #[test]
     fn the_runtime_has_two_worker_threads() {

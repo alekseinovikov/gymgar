@@ -19,6 +19,9 @@ jobs:
   ci:
     name: ci (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # A cold build and test run takes minutes; an hour means something hangs (a test waiting for ever, say), and the job
+    # stops then instead of holding the runner for GitHub's default of six hours.
+    timeout-minutes: 60
     strategy:
       # One failing OS must not hide the result of the other two.
       fail-fast: false

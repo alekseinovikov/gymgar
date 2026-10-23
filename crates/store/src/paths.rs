@@ -38,14 +38,30 @@ pub fn db_path(data_dir: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    #[test]
-    fn debug_build_uses_dev_dir() {
-        // No home directory (a bare CI container) means no data directory; nothing to assert then.
-        let Ok(dir) = data_dir() else { return };
+    /// The last component of the project directory the data directory is in; `None` without a home directory (a bare CI
+    /// container), when there is nothing to assert.
+    fn project_dir_name() -> Option<String> {
+        let dir = data_dir().ok()?;
         // `directories` appends a `data` component on Windows only.
-        let project_dir = if cfg!(windows) { dir.parent().map(Path::to_path_buf).unwrap_or_default() } else { dir };
+        let project_dir = if cfg!(windows) { dir.parent()?.to_path_buf() } else { dir };
+        project_dir.file_name()?.to_str().map(str::to_owned)
+    }
+
+    // `cargo test --release` builds without debug assertions, and so with the release directory: each build checks its own.
+    #[test]
+    #[cfg(debug_assertions)]
+    fn debug_build_uses_dev_dir() {
+        let Some(name) = project_dir_name() else { return };
         let expected = if cfg!(any(target_os = "macos", windows)) { "Gymgar Dev" } else { "gymgar-dev" };
-        assert_eq!(project_dir.file_name().and_then(|name| name.to_str()), Some(expected));
+        assert_eq!(name, expected);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn release_build_uses_the_app_dir() {
+        let Some(name) = project_dir_name() else { return };
+        let expected = if cfg!(any(target_os = "macos", windows)) { "Gymgar" } else { "gymgar" };
+        assert_eq!(name, expected);
     }
 
     #[test]

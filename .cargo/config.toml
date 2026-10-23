@@ -1,2 +1,8 @@
 [alias]
 xtask = "run -q -p xtask --"
+
+[env]
+# `aws-lc-sys` (the crypto of rustls, which reqwest uses for Garmin) assembles its x86_64 Windows code with NASM, which
+# a stock Windows machine or runner does not have. "1" makes it use the prebuilt NASM objects it ships instead. Other
+# targets ignore the variable.
+AWS_LC_SYS_PREBUILT_NASM = "1"
