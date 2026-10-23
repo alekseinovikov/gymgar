@@ -1,9 +1,10 @@
 //! Background jobs: work a [`CommandKind::Job`](crate::CommandKind::Job) command starts on the injected
 //! [`Spawner`], and the channel its result comes back through.
 //!
-//! A job only does the slow part (a Garmin request) and returns a [`JobOutput`]; it never touches the database or
-//! the secret stores' contents. [`Session::poll_jobs`](crate::Session::poll_jobs) applies the output on the
-//! session's thread (the UI thread in the app), so every write happens there. A job counts as running from its
+//! A job only does the slow part and returns a [`JobOutput`]: it asks Garmin, and `garmin.verify` first reads the key
+//! from its secret store (the system store may wait for the user to allow access, which must not freeze the window).
+//! A job never writes: not to the database, not to a secret store. [`Session::poll_jobs`](crate::Session::poll_jobs)
+//! applies the output on the session's thread (the UI thread in the app), so every write happens there. A job counts as running from its
 //! start until `poll_jobs` has taken its result, even if the future finished long before. A panic inside the job
 //! becomes [`EngineError::JobPanicked`] instead of taking the app down.
 

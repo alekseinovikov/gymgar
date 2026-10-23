@@ -347,6 +347,49 @@ fn connect_replaces_the_old_key() {
 }
 
 #[test]
+fn reconnect_into_another_store_removes_the_key_from_the_old_one() {
+    // The connection was made by a build that kept keys in a file; this one keeps them in the system store. Only the
+    // recorded store is ever read or cleared again, so a key left in the old one would stay there for good.
+    let cfg = TestConfig::default();
+    let (mut session, handles) = test_session_with(cfg.clone());
+    connected(&session, &handles, cfg.now, SecretBackend::File, "k-old");
+
+    let view = view_of(run_job(&mut session, "garmin.connect", connect_params("k-new")));
+    assert_eq!(view.secret_backend, Some(SecretBackend::System));
+    assert_eq!(stored_key(handles.system.as_ref().unwrap()).as_deref(), Some("k-new"));
+    assert_eq!(stored_key(&handles.file), None, "the old key is gone from the old store");
+
+    // And disconnecting now leaves no key anywhere.
+    session.execute("garmin.disconnect", Value::Null, Caller::User).unwrap();
+    assert_eq!((stored_key(handles.system.as_ref().unwrap()), stored_key(&handles.file)), (None, None));
+}
+
+#[test]
+fn reconnect_succeeds_when_the_old_store_cannot_be_cleared() {
+    // Clearing the old store is housekeeping: the new key is saved and recorded all the same.
+    let cfg = TestConfig::default();
+    let (mut session, handles) = test_session_with(cfg.clone());
+    connected(&session, &handles, cfg.now, SecretBackend::File, "k-old");
+    handles.file.set_failing(true);
+
+    let view = view_of(run_job(&mut session, "garmin.connect", connect_params("k-new")));
+    assert_eq!((view.status, view.secret_backend), (ConnectionStatus::Connected, Some(SecretBackend::System)));
+    assert_eq!(stored_key(handles.system.as_ref().unwrap()).as_deref(), Some("k-new"));
+    handles.file.set_failing(false);
+    assert_eq!(stored_key(&handles.file).as_deref(), Some("k-old"), "left behind, and logged");
+}
+
+#[test]
+fn reconnect_into_the_same_store_keeps_only_the_new_key() {
+    let cfg = TestConfig { prefer_file: true, ..TestConfig::default() };
+    let (mut session, handles) = test_session_with(cfg.clone());
+    connected(&session, &handles, cfg.now, SecretBackend::File, "k-old");
+    view_of(run_job(&mut session, "garmin.connect", connect_params("k-new")));
+    assert_eq!(stored_key(&handles.file).as_deref(), Some("k-new"), "replaced in place, not deleted");
+    assert_eq!(stored_key(handles.system.as_ref().unwrap()), None);
+}
+
+#[test]
 fn connect_trims_whitespace() {
     // Review Focus 1: a key pasted with spaces or a line break around it is checked and saved without them.
     for pasted in ["  k-123\n", "\tk-123 \r\n", "k-123"] {
@@ -699,6 +742,38 @@ fn verify_network_is_unverified() {
         assert_eq!(view.last_verified_at, connection.last_verified_at, "{error:?}: the last successful check stays");
         assert_eq!(stored_key(handles.system.as_ref().unwrap()).as_deref(), Some(KEY));
     }
+}
+
+#[test]
+fn verify_network_keeps_a_rejected_key_rejected() {
+    // Design spec §2, item 8: with no answer from Garmin the last known status stays. A key Garmin refused is not
+    // "connected, could not verify" just because the next check went unanswered.
+    for error in [GarminAuthError::Network, GarminAuthError::Unavailable, GarminAuthError::RateLimited, GarminAuthError::Unexpected] {
+        let cfg = TestConfig { garmin: Err(error), ..TestConfig::default() };
+        let (mut session, handles) = test_session_with(cfg.clone());
+        let mut rejected = connected(&session, &handles, cfg.now, SecretBackend::System, KEY);
+        rejected.last_status = ConnectionStatus::KeyRejected;
+        save_connection(&session, &rejected);
+
+        let finished = run_job(&mut session, "garmin.verify", Value::Null);
+        assert_eq!(finished.result, Err(EngineError::Garmin(error)));
+        assert_eq!(read_status(&mut session, Caller::Agent).status, ConnectionStatus::KeyRejected, "{error:?}");
+        assert_eq!(saved_connection(&session), Some(rejected), "{error:?}: nothing else changes either");
+        assert_eq!(stored_key(handles.system.as_ref().unwrap()).as_deref(), Some(KEY));
+    }
+}
+
+#[test]
+fn verify_network_after_a_missing_key_was_found_again_is_unverified() {
+    // The key is back in its store, so it is no longer missing; whether Garmin takes it is not known yet.
+    let cfg = TestConfig { garmin: Err(GarminAuthError::Network), ..TestConfig::default() };
+    let (mut session, handles) = test_session_with(cfg.clone());
+    let mut missing = connected(&session, &handles, cfg.now, SecretBackend::System, KEY);
+    missing.last_status = ConnectionStatus::KeyMissing;
+    save_connection(&session, &missing);
+
+    run_job(&mut session, "garmin.verify", Value::Null);
+    assert_eq!(saved_connection(&session), Some(GarminConnection { last_status: ConnectionStatus::Unverified, ..missing }));
 }
 
 #[test]

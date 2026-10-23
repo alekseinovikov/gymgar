@@ -51,6 +51,8 @@ pub struct GarminStatusView {
     /// Where the connected key is kept; `None` when not connected.
     pub secret_backend: Option<SecretBackend>,
     /// The system secret store exists in this session (debug builds may still prefer files: see `new_key_backend`).
+    /// Session-scoped, not a fact about the machine: always `false` in the CLI, whose session has no secret stores at
+    /// all, and in debug builds of the app, which never open the system store.
     pub system_store_available: bool,
     /// Where a key connected now would be saved; `None` when this session has no secret stores (the CLI).
     pub new_key_backend: Option<SecretBackend>,
@@ -114,7 +116,8 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
             id: VERIFY,
             description: "Check the saved Personal API key with Garmin in the background (one key-to-token exchange) and record the \
                           outcome: connected, keyRejected, keyMissing (the key is not in its secret store) or unverified (Garmin \
-                          could not be asked). Answers with a job id; the job's result is the new status.",
+                          could not be asked; a key already marked keyRejected stays so). Answers with a job id; the job's result \
+                          is the new status.",
             kind: CommandKind::Job,
             agent: false,
             destructive: false,
@@ -218,7 +221,8 @@ fn connect(session: &mut Session, params: Value) -> Result<Outcome, EngineError>
 }
 
 /// Applies a finished `garmin.connect`: if Garmin accepted the key, saves it and the connection record. Either both
-/// are saved or neither is: a key whose record cannot be saved is replaced by the key it replaced.
+/// are saved or neither is: a key whose record cannot be saved is replaced by the key it replaced. A key the replaced
+/// connection kept in another store is then removed from there.
 pub(crate) fn apply_connect(
     session: &Session,
     key: &SecretString,
@@ -227,12 +231,18 @@ pub(crate) fn apply_connect(
     result: Result<(), GarminAuthError>,
 ) -> Result<Value, EngineError> {
     result?;
-    let store = session
-        .services()
-        .secrets
-        .as_ref()
+    let secrets = session.services().secrets.as_ref();
+    let store = secrets
         .and_then(|secrets| secrets.store(backend))
         .ok_or_else(|| EngineError::Secrets(format!("the {} secret store is unavailable", backend.as_str())))?;
+    // Read before the new record overwrites it: where the key of the connection being replaced lives.
+    let replaced_backend = match session.store().garmin_connection() {
+        Ok(connection) => connection.map(|connection| connection.secret_backend),
+        Err(error) => {
+            log::warn!("cannot read the Garmin connection being replaced: {error}");
+            None
+        }
+    };
     let previous = match store.get() {
         Ok(previous) => previous,
         Err(error) => {
@@ -256,7 +266,24 @@ pub(crate) fn apply_connect(
         return Err(error.into());
     }
     log::info!("Garmin Connect connected for {} days; the key is kept in the {} secret store", term.days(), backend.as_str());
+    if let Some(replaced) = replaced_backend.filter(|replaced| *replaced != backend) {
+        delete_replaced_key(secrets, replaced);
+    }
     to_json(CONNECT, &status_view(session)?)
+}
+
+/// Removes the key of a replaced connection from `backend`, the store it was kept in, now that the new key lives in
+/// another one. Only the recorded store is ever read or cleared again, so the old key would otherwise stay there for
+/// good. Best effort: the new connection is saved already, so a failure is only logged.
+fn delete_replaced_key(secrets: Option<&SecretStores>, backend: SecretBackend) {
+    let Some(store) = secrets.and_then(|secrets| secrets.store(backend)) else {
+        log::warn!("the {} secret store, which holds the replaced Garmin key, is unavailable; the key stays there", backend.as_str());
+        return;
+    };
+    match store.delete() {
+        Ok(()) => log::info!("deleted the replaced Garmin key from the {} secret store", backend.as_str()),
+        Err(error) => log::warn!("cannot delete the replaced Garmin key from the {} secret store: {error}", backend.as_str()),
+    }
 }
 
 /// Puts back the key a failed connect replaced, or removes the new one when there was none. The connect has already
@@ -311,7 +338,11 @@ pub(crate) fn apply_verify(session: &Session, result: Result<(), EngineError>) -
         Err(EngineError::Garmin(GarminAuthError::KeyRejected)) => ConnectionStatus::KeyRejected,
         // The key is not where it was saved, or that store cannot be read (a locked keychain): design spec §2, item 7.
         Err(EngineError::KeyMissing | EngineError::Secrets(_)) => ConnectionStatus::KeyMissing,
-        // Garmin could not be asked (network, 429, 5xx, a strange answer): nothing is known about the key.
+        // Garmin could not be asked (network, 429, 5xx, a strange answer): nothing new is known about the key, so the
+        // last known status stands (design spec §2, item 8). A key Garmin refused stays refused; it must not turn into
+        // "connected, could not verify".
+        Err(_) if connection.last_status == ConnectionStatus::KeyRejected => ConnectionStatus::KeyRejected,
+        // Otherwise the key was there and may well work (a key found again after `keyMissing` included).
         Err(_) => ConnectionStatus::Unverified,
     };
     if result.is_ok() {
