@@ -86,10 +86,15 @@ pub(crate) fn always(_: &Session) -> Result<(), String> {
 
 /// The result of command `cmd` as [`Outcome::Done`].
 pub(crate) fn done<T: Serialize>(cmd: &str, result: &T) -> Result<Outcome, EngineError> {
+    to_json(cmd, result).map(Outcome::Done)
+}
+
+/// The result of command `cmd` as JSON: the answer of a query or mutation, or of a finished job.
+pub(crate) fn to_json<T: Serialize>(cmd: &str, result: &T) -> Result<Value, EngineError> {
     // Result types are plain structs (strings, numbers, dates), which serde_json always encodes. Should a future type
     // fail (a map with non-string keys), the command reports it instead of panicking. The engine has no "internal"
     // error variant, and the result is built from the database, so it is reported as a store error.
-    serde_json::to_value(result).map(Outcome::Done).map_err(|error| EngineError::Store(format!("cannot encode the result of {cmd} as JSON: {error}")))
+    serde_json::to_value(result).map_err(|error| EngineError::Store(format!("cannot encode the result of {cmd} as JSON: {error}")))
 }
 
 #[cfg(test)]
@@ -126,8 +131,8 @@ mod tests {
             assert!(find(id).is_none_or(|spec| !spec.agent), "{id}");
         }
         assert_eq!(all().iter().filter(|spec| spec.destructive).map(|spec| spec.id).collect::<Vec<_>>(), ["garmin.disconnect"]);
-        // The commands that need no background job are all registered.
-        for id in ["settings.get", "settings.setLanguage", "garmin.status", "garmin.disconnect"] {
+        // Every command of the table is registered.
+        for (id, ..) in SPEC_TABLE {
             assert!(find(id).is_some(), "{id} is not registered");
         }
     }

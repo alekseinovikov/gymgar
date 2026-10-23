@@ -1,26 +1,43 @@
-//! Garmin Connect commands: `garmin.status` and `garmin.disconnect`.
+//! Garmin Connect commands: `garmin.status`, `garmin.connect`, `garmin.verify` and `garmin.disconnect`.
 //!
 //! `garmin.status` reads the database only: it never opens a secret store or contacts Garmin, so agents and the
-//! CLI can call it freely. Only the key check sets statuses such as `keyMissing`.
+//! CLI can call it freely. Only the key check (`garmin.verify`) sets statuses such as `keyMissing`.
+//!
+//! `garmin.connect` and `garmin.verify` are jobs: the Garmin request runs on the injected spawner, and the result is
+//! applied (key saved, status recorded) by `Session::poll_jobs` through [`apply_connect`] and [`apply_verify`]. One
+//! key check runs at a time; while it does, every command that changes the connection is disabled.
 
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use gymgar_domain::{ConnectionStatus, SecretBackend, expiry_warning};
+use gymgar_domain::{ConnectionStatus, GarminConnection, KeyTerm, SecretBackend, expiry_warning, key_expires_at};
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::commands::{always, done};
+use crate::commands::{always, done, to_json};
+use crate::jobs::JobOutput;
 use crate::params::{self, NoParams};
-use crate::{CommandKind, CommandSpec, EngineError, Outcome, SecretStore, SecretStores, Session};
+use crate::{CommandKind, CommandSpec, EngineError, GarminAuth, GarminAuthError, Outcome, SecretStore, SecretStores, Session, Spawner};
 
 const STATUS: &str = "garmin.status";
+const CONNECT: &str = "garmin.connect";
+const VERIFY: &str = "garmin.verify";
 const DISCONNECT: &str = "garmin.disconnect";
+
+/// The jobs that check a key with Garmin. While one runs, connect, verify and disconnect are disabled.
+const KEY_CHECKS: [&str; 2] = [CONNECT, VERIFY];
 
 /// `enabled` reason of commands that need a connection.
 const NOT_CONNECTED: &str = "Garmin Connect is not connected";
+/// `enabled` reason while a key check runs (Review Focus 3: a second click must not start a second check).
+const CHECK_RUNNING: &str = "connection check already running";
+/// `enabled` reason in a session without secret stores (the CLI).
+const NO_SECRET_STORES: &str = "this session has no access to the secret stores";
 
-/// The answer of `garmin.status` (and of `garmin.disconnect`): the last known state of the connection.
+/// The answer of `garmin.status` (and of `garmin.connect`, `garmin.verify` and `garmin.disconnect`): the last known
+/// state of the connection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GarminStatusView {
@@ -43,6 +60,27 @@ pub struct GarminStatusView {
     pub check_running: bool,
 }
 
+/// The params of `garmin.connect`. The key never leaves this struct in readable form: its `Debug` prints a
+/// placeholder, and nothing serializes it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ConnectParams {
+    /// The Personal API key from Garmin Connect, as pasted. Spaces and line breaks around it are ignored.
+    #[schemars(with = "String")]
+    pub api_key: SecretString,
+    /// The key's lifetime in days, as chosen on the Garmin page when the key was issued: 30, 90, 180 or 365.
+    #[schemars(schema_with = "key_term_schema")]
+    pub key_term: KeyTerm,
+    /// The user agreed to keep the key in a file because the system secret store is unavailable.
+    #[serde(default)]
+    pub allow_file_store: bool,
+}
+
+/// `KeyTerm` lives in the domain, which knows nothing of JSON Schema; its serialized form (days) is spelled out here.
+fn key_term_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({ "type": "integer", "enum": KeyTerm::ALL.map(|term| term.days()) })
+}
+
 pub(crate) fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
@@ -56,6 +94,30 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
             params_schema: params::schema::<NoParams>,
             enabled: always,
             run: status,
+        },
+        CommandSpec {
+            id: CONNECT,
+            description: "Connect Garmin Connect with a Personal API key: exchange the key for a token in the background and, if Garmin \
+                          accepts it, save the key to the secret store and the connection to the database. A rejected key saves \
+                          nothing. Answers with a job id; the job's result is the new status.",
+            kind: CommandKind::Job,
+            agent: false,
+            destructive: false,
+            params_schema: params::schema::<ConnectParams>,
+            enabled: connect_enabled,
+            run: connect,
+        },
+        CommandSpec {
+            id: VERIFY,
+            description: "Check the saved Personal API key with Garmin in the background (one key-to-token exchange) and record the \
+                          outcome: connected, keyRejected, keyMissing (the key is not in its secret store) or unverified (Garmin \
+                          could not be asked). Answers with a job id; the job's result is the new status.",
+            kind: CommandKind::Job,
+            agent: false,
+            destructive: false,
+            params_schema: params::schema::<NoParams>,
+            enabled: verify_enabled,
+            run: verify,
         },
         CommandSpec {
             id: DISCONNECT,
@@ -90,17 +152,182 @@ fn status_view(session: &Session) -> Result<GarminStatusView, EngineError> {
         system_store_available: secrets.is_some_and(|s| s.system.is_some()),
         new_key_backend: secrets.map(SecretStores::new_key_backend),
         file_store_needs_consent: secrets.is_some_and(SecretStores::needs_file_consent),
-        check_running: false,
+        check_running: check_running(session),
     })
+}
+
+/// A key check has started and its result has not been applied yet.
+fn check_running(session: &Session) -> bool {
+    session.running_jobs().any(|command| KEY_CHECKS.contains(&command))
+}
+
+fn no_check_running(session: &Session) -> Result<(), String> {
+    if check_running(session) { Err(CHECK_RUNNING.to_owned()) } else { Ok(()) }
+}
+
+/// What a key check needs from the session's services.
+struct CheckServices {
+    secrets: SecretStores,
+    garmin: Arc<dyn GarminAuth>,
+    spawner: Arc<dyn Spawner>,
+}
+
+/// The services a key check needs, or why this session cannot run one.
+fn check_services(session: &Session) -> Result<CheckServices, String> {
+    let services = session.services();
+    Ok(CheckServices {
+        secrets: services.secrets.clone().ok_or(NO_SECRET_STORES)?,
+        garmin: services.garmin.clone().ok_or("this session cannot reach Garmin")?,
+        spawner: services.spawner.clone().ok_or("this session cannot run background jobs")?,
+    })
+}
+
+/// [`check_services`] inside `run`, where `enabled` has already passed.
+fn check_services_for(cmd: &str, session: &Session) -> Result<CheckServices, EngineError> {
+    check_services(session).map_err(|reason| EngineError::Disabled { cmd: cmd.to_owned(), reason })
+}
+
+fn connect_enabled(session: &Session) -> Result<(), String> {
+    no_check_running(session)?;
+    check_services(session).map(|_| ())
+}
+
+fn connect(session: &mut Session, params: Value) -> Result<Outcome, EngineError> {
+    let ConnectParams { api_key, key_term, allow_file_store } = params::parse(CONNECT, params)?;
+    // Review Focus 1: a key pasted with spaces or a line break around it is the same key. The trimmed key is the one
+    // checked and saved; an empty one is refused here instead of being sent to Garmin.
+    let key = SecretString::from(api_key.expose_secret().trim());
+    if key.expose_secret().is_empty() {
+        return Err(EngineError::BadParams { cmd: CONNECT.to_owned(), msg: "apiKey is empty".to_owned() });
+    }
+    let CheckServices { secrets, garmin, spawner } = check_services_for(CONNECT, session)?;
+    // The store is chosen before the request, so a key that may not be saved is never sent.
+    if secrets.needs_file_consent() && !allow_file_store {
+        return Err(EngineError::FileStoreConsentRequired);
+    }
+    let backend = secrets.new_key_backend();
+    let job = session.start_job(CONNECT, &spawner, async move {
+        let result = garmin.check_key(key.clone()).await;
+        JobOutput::ConnectChecked { key, term: key_term, backend, result }
+    });
+    Ok(Outcome::Started(job))
+}
+
+/// Applies a finished `garmin.connect`: if Garmin accepted the key, saves it and the connection record. Either both
+/// are saved or neither is: a key whose record cannot be saved is replaced by the key it replaced.
+pub(crate) fn apply_connect(
+    session: &Session,
+    key: &SecretString,
+    term: KeyTerm,
+    backend: SecretBackend,
+    result: Result<(), GarminAuthError>,
+) -> Result<Value, EngineError> {
+    result?;
+    let store = session
+        .services()
+        .secrets
+        .as_ref()
+        .and_then(|secrets| secrets.store(backend))
+        .ok_or_else(|| EngineError::Secrets(format!("the {} secret store is unavailable", backend.as_str())))?;
+    let previous = match store.get() {
+        Ok(previous) => previous,
+        Err(error) => {
+            // A key that cannot be read is no key at all: connecting is how the user replaces it.
+            log::warn!("cannot read the key being replaced in the {} secret store: {error}", backend.as_str());
+            None
+        }
+    };
+    store.set(key)?;
+    let now = session.now();
+    let connection = GarminConnection {
+        connected_at: now,
+        key_term: term,
+        key_expires_at: key_expires_at(now, term),
+        last_verified_at: Some(now),
+        last_status: ConnectionStatus::Connected,
+        secret_backend: backend,
+    };
+    if let Err(error) = session.store().save_garmin_connection(&connection) {
+        restore_key(store.as_ref(), previous);
+        return Err(error.into());
+    }
+    log::info!("Garmin Connect connected for {} days; the key is kept in the {} secret store", term.days(), backend.as_str());
+    to_json(CONNECT, &status_view(session)?)
+}
+
+/// Puts back the key a failed connect replaced, or removes the new one when there was none. The connect has already
+/// failed and reports why, so a failure here can only be logged.
+fn restore_key(store: &dyn SecretStore, previous: Option<SecretString>) {
+    let restored = match previous {
+        Some(key) => store.set(&key),
+        None => store.delete(),
+    };
+    if let Err(error) = restored {
+        log::error!("cannot restore the {} secret store after a failed connect: {error}", store.backend().as_str());
+    }
+}
+
+fn verify_enabled(session: &Session) -> Result<(), String> {
+    no_check_running(session)?;
+    check_services(session)?;
+    // A database failure does not grey the command out: `run` reports it as the store error it is.
+    let Ok(connection) = session.store().garmin_connection() else { return Ok(()) };
+    connection.map(|_| ()).ok_or_else(|| NOT_CONNECTED.to_owned())
+}
+
+fn verify(session: &mut Session, params: Value) -> Result<Outcome, EngineError> {
+    params::parse::<NoParams>(VERIFY, params)?;
+    let CheckServices { secrets, garmin, spawner } = check_services_for(VERIFY, session)?;
+    let connection = session.store().garmin_connection()?.ok_or(EngineError::NotConnected)?;
+    // The key is read from the store it was saved to, never from where a new key would go now. That store may be
+    // missing in this session (the store changed): then the key is missing too.
+    let store = secrets.store(connection.secret_backend).cloned();
+    let job = session.start_job(VERIFY, &spawner, async move {
+        // Read inside the job, off the session's thread: the system store may wait for the user to allow access.
+        let result = match read_key(store) {
+            Ok(key) => garmin.check_key(key).await.map_err(EngineError::from),
+            Err(error) => Err(error),
+        };
+        JobOutput::VerifyChecked { result }
+    });
+    Ok(Outcome::Started(job))
+}
+
+/// The key in `store`; `KeyMissing` when there is no store or no key in it.
+fn read_key(store: Option<Arc<dyn SecretStore>>) -> Result<SecretString, EngineError> {
+    store.ok_or(EngineError::KeyMissing)?.get()?.ok_or(EngineError::KeyMissing)
+}
+
+/// Applies a finished `garmin.verify`: records what the check found out, then answers with the new status, or with
+/// the reason the key did not pass.
+pub(crate) fn apply_verify(session: &Session, result: Result<(), EngineError>) -> Result<Value, EngineError> {
+    let mut connection = session.store().garmin_connection()?.ok_or(EngineError::NotConnected)?;
+    connection.last_status = match &result {
+        Ok(()) => ConnectionStatus::Connected,
+        Err(EngineError::Garmin(GarminAuthError::KeyRejected)) => ConnectionStatus::KeyRejected,
+        // The key is not where it was saved, or that store cannot be read (a locked keychain): design spec §2, item 7.
+        Err(EngineError::KeyMissing | EngineError::Secrets(_)) => ConnectionStatus::KeyMissing,
+        // Garmin could not be asked (network, 429, 5xx, a strange answer): nothing is known about the key.
+        Err(_) => ConnectionStatus::Unverified,
+    };
+    if result.is_ok() {
+        connection.last_verified_at = Some(session.now());
+    }
+    // The key is never deleted here, whatever the check found (design spec §2, item 6).
+    session.store().save_garmin_connection(&connection)?;
+    log::info!("Garmin key check finished: {}", connection.last_status.as_str());
+    result?;
+    to_json(VERIFY, &status_view(session)?)
 }
 
 /// The secret store holding the key of a connection recorded with `backend`, or why it cannot be reached.
 fn key_store(session: &Session, backend: SecretBackend) -> Result<&Arc<dyn SecretStore>, String> {
-    let secrets = session.services().secrets.as_ref().ok_or("this session has no access to the secret stores")?;
+    let secrets = session.services().secrets.as_ref().ok_or(NO_SECRET_STORES)?;
     secrets.store(backend).ok_or_else(|| format!("the {} secret store, which holds the key, is unavailable", backend.as_str()))
 }
 
 fn disconnect_enabled(session: &Session) -> Result<(), String> {
+    no_check_running(session)?;
     // A database failure does not grey the command out: `run` reports it as the store error it is.
     let Ok(connection) = session.store().garmin_connection() else { return Ok(()) };
     let connection = connection.ok_or(NOT_CONNECTED)?;
@@ -119,206 +346,5 @@ fn disconnect(session: &mut Session, params: Value) -> Result<Outcome, EngineErr
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::testing::{TestConfig, connection_at, fixed_clock, save_connection, saved_connection, stored_key, test_session, test_session_with};
-    use crate::{Caller, Services};
-    use chrono::Duration;
-    use gymgar_store::Store;
-    use secrecy::SecretString;
-    use serde_json::json;
-
-    fn read_status(session: &mut Session, caller: Caller) -> GarminStatusView {
-        match session.execute("garmin.status", Value::Null, caller) {
-            Ok(Outcome::Done(value)) => serde_json::from_value(value).unwrap(),
-            other => panic!("garmin.status: {other:?}"),
-        }
-    }
-
-    /// The services of `gymgar-cli`: no secret stores, no Garmin, no spawner.
-    fn headless_session() -> Session {
-        let services = Services { secrets: None, garmin: None, spawner: None, notify: Arc::new(|| {}), clock: fixed_clock(TestConfig::default().now) };
-        Session::new(Store::open_in_memory().unwrap(), services)
-    }
-
-    #[test]
-    fn status_not_connected_by_default() {
-        let mut session = test_session();
-        for caller in [Caller::User, Caller::Agent] {
-            assert_eq!(
-                read_status(&mut session, caller),
-                GarminStatusView {
-                    status: ConnectionStatus::NotConnected,
-                    key_expires_at: None,
-                    last_verified_at: None,
-                    expiry_warning: false,
-                    secret_backend: None,
-                    system_store_available: true,
-                    new_key_backend: Some(SecretBackend::System),
-                    file_store_needs_consent: false,
-                    check_running: false,
-                }
-            );
-        }
-        let Ok(Outcome::Done(raw)) = session.execute("garmin.status", json!({}), Caller::Agent) else { panic!("garmin.status failed") };
-        assert_eq!(raw.get("status"), Some(&json!("notConnected")));
-        assert_eq!(raw.get("expiryWarning"), Some(&json!(false)));
-        assert_eq!(raw.get("keyExpiresAt"), Some(&Value::Null));
-        assert_eq!(raw.get("newKeyBackend"), Some(&json!("system")));
-        assert_eq!(raw.get("fileStoreNeedsConsent"), Some(&json!(false)));
-    }
-
-    #[test]
-    fn status_reports_the_saved_connection() {
-        let cfg = TestConfig::default();
-        let (mut session, _) = test_session_with(cfg.clone());
-        let connection = connection_at(cfg.now - Duration::days(10), SecretBackend::File);
-        save_connection(&session, &connection);
-
-        let view = read_status(&mut session, Caller::Agent);
-        assert_eq!(view.status, ConnectionStatus::Connected);
-        assert_eq!(view.key_expires_at, Some(connection.key_expires_at));
-        assert_eq!(view.last_verified_at, connection.last_verified_at);
-        assert_eq!(view.secret_backend, Some(SecretBackend::File));
-        assert!(!view.expiry_warning);
-
-        let Ok(Outcome::Done(raw)) = session.execute("garmin.status", Value::Null, Caller::User) else { panic!("garmin.status failed") };
-        assert_eq!(raw.get("keyExpiresAt"), Some(&json!("2027-10-13T12:00:00Z")));
-        assert_eq!(raw.get("secretBackend"), Some(&json!("file")));
-    }
-
-    #[test]
-    fn status_reports_expiry_warning() {
-        let cfg = TestConfig::default();
-        let (mut session, _) = test_session_with(cfg.clone());
-        let mut connection = connection_at(cfg.now - Duration::days(360), SecretBackend::System);
-        connection.key_expires_at = cfg.now + Duration::days(5);
-        save_connection(&session, &connection);
-        assert!(read_status(&mut session, Caller::Agent).expiry_warning);
-
-        // The warning follows the session's clock, not the wall clock.
-        connection.key_expires_at = cfg.now + Duration::days(8);
-        save_connection(&session, &connection);
-        assert!(!read_status(&mut session, Caller::Agent).expiry_warning);
-    }
-
-    #[test]
-    fn status_reports_where_a_new_key_goes() {
-        let with_stores = |system_store, prefer_file| test_session_with(TestConfig { system_store, prefer_file, ..TestConfig::default() }).0;
-        // (case, session, systemStoreAvailable, newKeyBackend, fileStoreNeedsConsent)
-        let cases = [
-            ("CLI without secret stores", headless_session(), false, None, false),
-            ("debug build, system store present", with_stores(true, true), true, Some(SecretBackend::File), false),
-            ("release build with a system store", with_stores(true, false), true, Some(SecretBackend::System), false),
-            ("release build without a system store", with_stores(false, false), false, Some(SecretBackend::File), true),
-        ];
-        for (case, mut session, available, backend, consent) in cases {
-            let view = read_status(&mut session, Caller::Agent);
-            assert_eq!((view.system_store_available, view.new_key_backend, view.file_store_needs_consent), (available, backend, consent), "{case}");
-        }
-    }
-
-    #[test]
-    fn agent_cannot_disconnect() {
-        let cfg = TestConfig::default();
-        let (mut session, handles) = test_session_with(cfg.clone());
-        let connection = connection_at(cfg.now, SecretBackend::System);
-        save_connection(&session, &connection);
-        let system = handles.system.unwrap();
-        system.set(&SecretString::from("k-123")).unwrap();
-
-        assert_eq!(session.execute("garmin.disconnect", Value::Null, Caller::Agent), Err(EngineError::AgentNotAllowed("garmin.disconnect".to_owned())));
-        assert_eq!(saved_connection(&session), Some(connection));
-        assert_eq!(stored_key(&system).as_deref(), Some("k-123"));
-    }
-
-    #[test]
-    fn disconnect_removes_key_and_row() {
-        for backend in [SecretBackend::System, SecretBackend::File] {
-            let cfg = TestConfig::default();
-            let (mut session, handles) = test_session_with(cfg.clone());
-            let system = handles.system.unwrap();
-            let (recorded, other) = match backend {
-                SecretBackend::System => (system, handles.file),
-                SecretBackend::File => (handles.file, system),
-            };
-            save_connection(&session, &connection_at(cfg.now, backend));
-            recorded.set(&SecretString::from("k-123")).unwrap();
-            other.set(&SecretString::from("k-other")).unwrap();
-
-            let answer = session.execute("garmin.disconnect", Value::Null, Caller::User);
-            let Ok(Outcome::Done(raw)) = answer else { panic!("{backend:?}: {answer:?}") };
-            assert!(!raw.to_string().contains("k-123"), "{raw}");
-            assert_eq!(serde_json::from_value::<GarminStatusView>(raw).unwrap().status, ConnectionStatus::NotConnected);
-            assert_eq!(stored_key(&recorded), None, "{backend:?}");
-            assert_eq!(saved_connection(&session), None, "{backend:?}");
-            // Only the store recorded with the connection is touched.
-            assert_eq!(stored_key(&other).as_deref(), Some("k-other"), "{backend:?}");
-        }
-    }
-
-    #[test]
-    fn disconnect_keeps_the_connection_when_the_key_cannot_be_deleted() {
-        let cfg = TestConfig::default();
-        let (mut session, handles) = test_session_with(cfg.clone());
-        let connection = connection_at(cfg.now, SecretBackend::File);
-        save_connection(&session, &connection);
-        handles.file.set(&SecretString::from("k-123")).unwrap();
-        handles.file.set_failing(true);
-
-        assert!(matches!(session.execute("garmin.disconnect", Value::Null, Caller::User), Err(EngineError::Secrets(_))));
-        handles.file.set_failing(false);
-        assert_eq!(saved_connection(&session), Some(connection));
-        assert_eq!(stored_key(&handles.file).as_deref(), Some("k-123"));
-    }
-
-    #[test]
-    fn disconnect_when_not_connected_is_disabled() {
-        let mut session = test_session();
-        match session.execute("garmin.disconnect", Value::Null, Caller::User) {
-            Err(EngineError::Disabled { cmd, reason }) => {
-                assert_eq!(cmd, "garmin.disconnect");
-                assert!(reason.contains("not connected"), "{reason}");
-            }
-            other => panic!("expected Disabled, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn disconnect_without_the_recorded_store_is_disabled() {
-        let cfg = TestConfig { system_store: false, ..TestConfig::default() };
-        let (mut session, _) = test_session_with(cfg.clone());
-        let connection = connection_at(cfg.now, SecretBackend::System);
-        save_connection(&session, &connection);
-        match session.execute("garmin.disconnect", Value::Null, Caller::User) {
-            Err(EngineError::Disabled { reason, .. }) => assert!(reason.contains("system secret store"), "{reason}"),
-            other => panic!("expected Disabled, got {other:?}"),
-        }
-        assert_eq!(saved_connection(&session), Some(connection));
-
-        let mut headless = headless_session();
-        save_connection(&headless, &connection_at(cfg.now, SecretBackend::File));
-        match headless.execute("garmin.disconnect", Value::Null, Caller::User) {
-            Err(EngineError::Disabled { reason, .. }) => assert!(reason.contains("secret store"), "{reason}"),
-            other => panic!("expected Disabled, got {other:?}"),
-        }
-        assert!(saved_connection(&headless).is_some());
-    }
-
-    #[test]
-    fn bad_params_are_errors() {
-        let cfg = TestConfig::default();
-        let (mut session, handles) = test_session_with(cfg.clone());
-        save_connection(&session, &connection_at(cfg.now, SecretBackend::File));
-        handles.file.set(&SecretString::from("k-123")).unwrap();
-        for id in ["garmin.status", "garmin.disconnect"] {
-            for params in [json!({"force": true}), json!(1), json!("x"), json!([])] {
-                let result = session.execute(id, params.clone(), Caller::User);
-                assert!(matches!(result, Err(EngineError::BadParams { .. })), "{id} {params}: {result:?}");
-            }
-        }
-        // A rejected disconnect changed nothing.
-        assert!(saved_connection(&session).is_some());
-        assert_eq!(stored_key(&handles.file).as_deref(), Some("k-123"));
-    }
-}
+#[path = "garmin_cmds_tests.rs"]
+mod tests;
