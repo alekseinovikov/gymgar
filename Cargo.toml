@@ -43,6 +43,10 @@ tokio = { version = "1.54", default-features = false }
 base64 = "0.23"
 # Local mock server for Garmin API tests (tests never reach the real Garmin).
 wiremock = "0.6"
+# SQLite for gymgar-store; `bundled` compiles SQLite into the app so it never depends on a system library.
+rusqlite = { version = "0.40", features = ["bundled"] }
+# Per-OS user data directory (where the database and the file secret store live).
+directories = "6"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

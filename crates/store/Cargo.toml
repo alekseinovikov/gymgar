@@ -9,3 +9,13 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+gymgar-domain = { workspace = true }
+chrono = { workspace = true }
+directories = { workspace = true }
+rusqlite = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
