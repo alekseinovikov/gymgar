@@ -19,13 +19,21 @@ use gymgar_engine::testing::TestConfig;
 
 use crate::i18n::Lang;
 use crate::test_support::{app_connected, app_in, builder, click, pick, tick, type_key, working_connection};
-use crate::{GymgarApp, Section};
+use crate::{GymgarApp, Section, StartupErrorApp};
 
 /// The environment variable that names the directory the PNGs go to.
 const DIRECTORY_VARIABLE: &str = "GYMGAR_SNAPSHOTS";
 
 /// Points to pixels, so the text in the PNGs is as sharp as on a retina screen.
 const SCALE: f32 = 2.0;
+
+/// The window of the "cannot start" screen, the size the app opens it with.
+fn error_window(app: StartupErrorApp) -> Harness<'static, StartupErrorApp> {
+    let mut harness: Harness<'static, StartupErrorApp> =
+        builder().with_size(egui::vec2(720.0, 400.0)).with_pixels_per_point(SCALE).wgpu().build_eframe(move |_| app);
+    harness.run();
+    harness
+}
 
 /// A made-up key to fill the field with; it is hidden in the picture.
 const KEY: &str = "zq-abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz";
@@ -40,7 +48,7 @@ fn window(app: GymgarApp, section: Section) -> Shot {
     harness
 }
 
-fn save(harness: &mut Shot, directory: &Path, state: &str, lang: Lang) {
+fn save<S>(harness: &mut Harness<'static, S>, directory: &Path, state: &str, lang: Lang) {
     // The pointer, left over a button by the last click, is not part of the screen.
     harness.event(egui::Event::PointerGone);
     harness.step();
@@ -112,8 +120,27 @@ fn render_snapshots() {
             save(&mut window(app, Section::Settings), &directory, name, lang);
         }
 
-        // 6. No system password store: the warning about the file and the consent box.
-        let (app, _handles) = app_in(lang, TestConfig { system_store: false, ..on_hold() });
-        save(&mut window(app, Section::Settings), &directory, "settings-file-consent", lang);
+        // 6. No system password store: the warning that names the file, and the consent box. A path as long as a real one on
+        // macOS, and a long Windows one that has no spaces to break at.
+        for (path, name) in [
+            ("/Users/alexandra/Library/Application Support/Gymgar/secrets/garmin-personal-api-key", "settings-file-consent"),
+            (r"C:\Users\alexandra.petrovna-ivanova\AppData\Roaming\Gymgar\data\secrets\garmin-personal-api-key", "settings-file-consent-windows-path"),
+        ] {
+            let cfg = TestConfig { system_store: false, file_store_location: Some(path.to_owned()), ..on_hold() };
+            let (app, _handles) = app_in(lang, cfg);
+            save(&mut window(app, Section::Settings), &directory, name, lang);
+        }
+
+        // 7. Gymgar cannot start: the database is damaged.
+        let locale = Some(pick(lang, "en-US", "ru-RU").to_owned());
+        let file = std::path::Path::new("/Users/alexandra/Library/Application Support/Gymgar/gymgar.sqlite3");
+        let error = "the database is corrupt: /Users/alexandra/Library/Application Support/Gymgar/gymgar.sqlite3: file is not a database";
+        save(&mut error_window(StartupErrorApp::with_system_locale(error, Some(file), locale.clone())), &directory, "cannot-start-database", lang);
+        save(
+            &mut error_window(StartupErrorApp::with_system_locale("cannot start the background runtime: out of threads", None, locale)),
+            &directory,
+            "cannot-start-runtime",
+            lang,
+        );
     }
 }

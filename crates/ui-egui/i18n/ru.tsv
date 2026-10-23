@@ -49,6 +49,7 @@ The key is stored in the macOS keychain	Ключ хранится в связк�
 The key is stored in the Windows credential manager	Ключ хранится в диспетчере учётных данных Windows
 The key is stored in the system password store	Ключ хранится в хранилище паролей системы
 The key is stored in a file on disk	Ключ хранится в файле на диске
+The system password store is unavailable. Save the key to the file {}? Any program running as you will be able to read it.	Системное хранилище паролей недоступно. Сохранить ключ в файл {}? Его сможет прочитать любая программа, запущенная от вашего имени.
 The system password store is unavailable. Save the key to a file instead? Any program running as you will be able to read it.	Системное хранилище паролей недоступно. Сохранить ключ в файл? Его сможет прочитать любая программа, запущенная от вашего имени.
 Save the key to a file	Сохранить ключ в файл
 Connected	Подключено
@@ -85,3 +86,10 @@ September	сентября
 October	октября
 November	ноября
 December	декабря
+
+# The window shown when Gymgar cannot start
+Gymgar cannot start	Gymgar не может запуститься
+Gymgar could not open its data. Check that the disk is available and the file is not damaged, then start Gymgar again.	Gymgar не смог открыть свои данные. Проверьте, что диск доступен, а файл не повреждён, и запустите Gymgar снова.
+Start Gymgar again. If the problem remains, report the error below.	Запустите Gymgar снова. Если проблема останется, сообщите об ошибке ниже.
+Details	Подробности
+File	Файл

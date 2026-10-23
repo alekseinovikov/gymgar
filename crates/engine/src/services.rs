@@ -25,6 +25,11 @@ pub trait SecretStore: Send + Sync {
     fn set(&self, key: &SecretString) -> Result<(), SecretStoreError>;
     /// Removes the key; succeeds when there is none.
     fn delete(&self) -> Result<(), SecretStoreError>;
+    /// Where the key lives, as text for the user: the path of a file store. `None` for stores that have no place the
+    /// user could look at, such as the system keychain.
+    fn location(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A secret store failure. The text describes the failure and never contains the secret.
@@ -123,6 +128,13 @@ mod tests {
             file: Arc::new(MemorySecretStore::new(SecretBackend::File)),
             prefer_file,
         }
+    }
+
+    #[test]
+    fn a_store_has_no_location_unless_it_says_so() {
+        let plain = MemorySecretStore::new(SecretBackend::System);
+        assert_eq!(plain.location(), None);
+        assert_eq!(MemorySecretStore::new(SecretBackend::File).with_location("/data/secrets/key").location().as_deref(), Some("/data/secrets/key"));
     }
 
     #[test]

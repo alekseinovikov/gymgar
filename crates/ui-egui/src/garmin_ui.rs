@@ -32,6 +32,16 @@ fn storage_hint(ui: &mut Ui, backend: SecretBackend) {
     widgets::hint(ui, storage_line(backend, std::env::consts::OS));
 }
 
+/// The warning before the key goes to a file (spec section 7): it names the file, so the user knows what they agree to. A
+/// store that cannot say where its file is gets the same warning without a place.
+fn file_consent_text(location: Option<&str>) -> String {
+    match location {
+        Some(path) => tl!("The system password store is unavailable. Save the key to the file {}? Any program running as you will be able to read it.")
+            .replace("{}", path),
+        None => tl!("The system password store is unavailable. Save the key to a file instead? Any program running as you will be able to read it.").to_owned(),
+    }
+}
+
 /// Draws the Garmin Connect card.
 pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
@@ -205,10 +215,7 @@ fn connect_form(app: &mut GymgarApp, ui: &mut Ui, t: &Tokens, status: &GarminSta
             ui.end_row();
         });
         if status.file_store_needs_consent {
-            widgets::warning_box(
-                ui,
-                tl!("The system password store is unavailable. Save the key to a file instead? Any program running as you will be able to read it."),
-            );
+            widgets::warning_box(ui, &file_consent_text(status.file_store_location.as_deref()));
             ui.checkbox(&mut form.allow_file_store, tl!("Save the key to a file"));
         }
     });

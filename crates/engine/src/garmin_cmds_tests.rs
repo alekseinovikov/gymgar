@@ -2,7 +2,10 @@
 //! (`deferred`); either way a result is applied only by `Session::poll_jobs`.
 
 use super::*;
-use crate::testing::{TestConfig, connection_at, fixed_clock, save_connection, saved_connection, stored_key, test_session, test_session_on, test_session_with};
+use crate::testing::{
+    TEST_FILE_STORE_LOCATION, TestConfig, connection_at, fixed_clock, save_connection, saved_connection, stored_key, test_session, test_session_on,
+    test_session_with,
+};
 use crate::{Caller, JobFinished, Services, commands};
 use chrono::Duration;
 use gymgar_store::Store;
@@ -39,6 +42,7 @@ fn status_not_connected_by_default() {
                 system_store_available: true,
                 new_key_backend: Some(SecretBackend::System),
                 file_store_needs_consent: false,
+                file_store_location: Some(TEST_FILE_STORE_LOCATION.to_owned()),
                 check_running: false,
             }
         );
@@ -49,6 +53,7 @@ fn status_not_connected_by_default() {
     assert_eq!(raw.get("keyExpiresAt"), Some(&Value::Null));
     assert_eq!(raw.get("newKeyBackend"), Some(&json!("system")));
     assert_eq!(raw.get("fileStoreNeedsConsent"), Some(&json!(false)));
+    assert_eq!(raw.get("fileStoreLocation"), Some(&json!(TEST_FILE_STORE_LOCATION)));
 }
 
 #[test]
@@ -88,17 +93,31 @@ fn status_reports_expiry_warning() {
 #[test]
 fn status_reports_where_a_new_key_goes() {
     let with_stores = |system_store, prefer_file| test_session_with(TestConfig { system_store, prefer_file, ..TestConfig::default() }).0;
-    // (case, session, systemStoreAvailable, newKeyBackend, fileStoreNeedsConsent)
+    let file = Some(TEST_FILE_STORE_LOCATION.to_owned());
+    // (case, session, systemStoreAvailable, newKeyBackend, fileStoreNeedsConsent, fileStoreLocation)
     let cases = [
-        ("CLI without secret stores", headless_session(), false, None, false),
-        ("debug build, system store present", with_stores(true, true), true, Some(SecretBackend::File), false),
-        ("release build with a system store", with_stores(true, false), true, Some(SecretBackend::System), false),
-        ("release build without a system store", with_stores(false, false), false, Some(SecretBackend::File), true),
+        ("CLI without secret stores", headless_session(), false, None, false, None),
+        ("debug build, system store present", with_stores(true, true), true, Some(SecretBackend::File), false, file.clone()),
+        ("release build with a system store", with_stores(true, false), true, Some(SecretBackend::System), false, file.clone()),
+        ("release build without a system store", with_stores(false, false), false, Some(SecretBackend::File), true, file),
     ];
-    for (case, mut session, available, backend, consent) in cases {
+    for (case, mut session, available, backend, consent, location) in cases {
         let view = read_status(&mut session, Caller::Agent);
-        assert_eq!((view.system_store_available, view.new_key_backend, view.file_store_needs_consent), (available, backend, consent), "{case}");
+        assert_eq!(
+            (view.system_store_available, view.new_key_backend, view.file_store_needs_consent, view.file_store_location),
+            (available, backend, consent, location),
+            "{case}"
+        );
     }
+}
+
+#[test]
+fn status_has_no_file_location_when_the_file_store_does_not_know_it() {
+    // A store that does not override `SecretStore::location` has none to report; the status then says so instead of guessing.
+    let (mut session, _) = test_session_with(TestConfig { file_store_location: None, ..TestConfig::default() });
+    assert_eq!(read_status(&mut session, Caller::Agent).file_store_location, None);
+    let Ok(Outcome::Done(raw)) = session.execute("garmin.status", Value::Null, Caller::Agent) else { panic!("garmin.status failed") };
+    assert_eq!(raw.get("fileStoreLocation"), Some(&Value::Null));
 }
 
 #[test]

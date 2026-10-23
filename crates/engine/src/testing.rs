@@ -24,11 +24,18 @@ pub struct MemorySecretStore {
     backend: SecretBackend,
     key: Mutex<Option<SecretString>>,
     failing: Mutex<bool>,
+    location: Option<String>,
 }
 
 impl MemorySecretStore {
     pub fn new(backend: SecretBackend) -> MemorySecretStore {
-        MemorySecretStore { backend, key: Mutex::new(None), failing: Mutex::new(false) }
+        MemorySecretStore { backend, key: Mutex::new(None), failing: Mutex::new(false), location: None }
+    }
+
+    /// The same store, reporting `location` as the place its key lives (like a file store reports its path).
+    pub fn with_location(mut self, location: impl Into<String>) -> MemorySecretStore {
+        self.location = Some(location.into());
+        self
     }
 
     /// Makes every following `get`, `set` and `delete` fail (or work again).
@@ -64,6 +71,10 @@ impl SecretStore for MemorySecretStore {
         self.check()?;
         *self.key.lock().unwrap_or_else(PoisonError::into_inner) = None;
         Ok(())
+    }
+
+    fn location(&self) -> Option<String> {
+        self.location.clone()
     }
 }
 
@@ -172,6 +183,9 @@ pub fn fixed_clock(now: DateTime<Utc>) -> Arc<dyn Fn() -> DateTime<Utc> + Send +
     Arc::new(move || now)
 }
 
+/// The place the test file store says its key lives in, unless `TestConfig::file_store_location` says otherwise.
+pub const TEST_FILE_STORE_LOCATION: &str = "/test/secrets/garmin-personal-api-key";
+
 /// How [`test_session_with`] builds the session's services.
 #[derive(Debug, Clone)]
 pub struct TestConfig {
@@ -183,6 +197,8 @@ pub struct TestConfig {
     pub system_store: bool,
     /// `SecretStores::prefer_file`, as in debug builds.
     pub prefer_file: bool,
+    /// What the test file store reports as its location; `None` stands for a store that does not know where it keeps the key.
+    pub file_store_location: Option<String>,
     /// Background futures wait for `DeferredSpawner::run_pending` instead of running inline.
     pub deferred: bool,
     /// The fixed time of the session's clock.
@@ -196,6 +212,7 @@ impl Default for TestConfig {
             garmin_panics: false,
             system_store: true,
             prefer_file: false,
+            file_store_location: Some(TEST_FILE_STORE_LOCATION.to_owned()),
             deferred: false,
             now: Utc.with_ymd_and_hms(2026, 10, 23, 12, 0, 0).unwrap(),
         }
@@ -222,7 +239,10 @@ pub fn test_session_with(cfg: TestConfig) -> (Session, TestHandles) {
 /// A session on `store` (for example a file database shared with a second connection) with the doubles from `cfg`.
 pub fn test_session_on(store: Store, cfg: TestConfig) -> (Session, TestHandles) {
     let system = cfg.system_store.then(|| Arc::new(MemorySecretStore::new(SecretBackend::System)));
-    let file = Arc::new(MemorySecretStore::new(SecretBackend::File));
+    let file = Arc::new(match &cfg.file_store_location {
+        Some(location) => MemorySecretStore::new(SecretBackend::File).with_location(location),
+        None => MemorySecretStore::new(SecretBackend::File),
+    });
     let garmin = Arc::new(if cfg.garmin_panics { FakeGarminAuth::panicking() } else { FakeGarminAuth::returning(cfg.garmin) });
     let deferred = cfg.deferred.then(|| Arc::new(DeferredSpawner::new()));
     let spawner: Arc<dyn Spawner> = match &deferred {

@@ -325,10 +325,11 @@ fn file_store_consent_required() {
     for lang in Lang::ALL {
         let cfg = TestConfig { system_store: false, prefer_file: false, ..TestConfig::default() };
         let (mut harness, handles) = settings(lang, cfg);
+        // Spec section 7: the warning names the file, so the user knows what they agree to.
         let warning = pick(
             lang,
-            "The system password store is unavailable. Save the key to a file instead? Any program running as you will be able to read it.",
-            "Системное хранилище паролей недоступно. Сохранить ключ в файл? Его сможет прочитать любая программа, запущенная от вашего имени.",
+            "The system password store is unavailable. Save the key to the file /test/secrets/garmin-personal-api-key? Any program running as you will be able to read it.",
+            "Системное хранилище паролей недоступно. Сохранить ключ в файл /test/secrets/garmin-personal-api-key? Его сможет прочитать любая программа, запущенная от вашего имени.",
         );
         let tick_box = pick(lang, "Save the key to a file", "Сохранить ключ в файл");
         harness.get_by_label(warning);
@@ -359,6 +360,37 @@ fn file_store_consent_required() {
         // A connection made to a file says so.
         harness.get_by_label(pick(lang, "The key is stored in a file on disk", "Ключ хранится в файле на диске"));
         assert!(harness.query_by_label(warning).is_none(), "{lang:?}: nothing to consent to once connected");
+    }
+}
+
+#[test]
+fn the_consent_warning_names_the_file_the_engine_reports() {
+    for lang in Lang::ALL {
+        let location = "/home/user/.local/share/gymgar/secrets/garmin-personal-api-key";
+        let cfg = TestConfig { system_store: false, file_store_location: Some(location.to_owned()), ..TestConfig::default() };
+        let (harness, _handles) = settings(lang, cfg);
+        let (before, after) = match lang {
+            Lang::En => ("The system password store is unavailable. Save the key to the file ", "? Any program running as you will be able to read it."),
+            Lang::Ru => {
+                ("Системное хранилище паролей недоступно. Сохранить ключ в файл ", "? Его сможет прочитать любая программа, запущенная от вашего имени.")
+            }
+        };
+        harness.get_by_label(&format!("{before}{location}{after}"));
+    }
+}
+
+#[test]
+fn the_consent_warning_still_asks_when_the_file_is_not_known() {
+    // A store that cannot say where it keeps the key: the warning has no path to show, but the consent is still asked for.
+    for lang in Lang::ALL {
+        let cfg = TestConfig { system_store: false, file_store_location: None, ..TestConfig::default() };
+        let (harness, _handles) = settings(lang, cfg);
+        harness.get_by_label(pick(
+            lang,
+            "The system password store is unavailable. Save the key to a file instead? Any program running as you will be able to read it.",
+            "Системное хранилище паролей недоступно. Сохранить ключ в файл? Его сможет прочитать любая программа, запущенная от вашего имени.",
+        ));
+        harness.get_by_role_and_label(Role::CheckBox, pick(lang, "Save the key to a file", "Сохранить ключ в файл"));
     }
 }
 

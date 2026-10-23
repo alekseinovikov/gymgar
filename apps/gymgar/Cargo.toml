@@ -11,10 +11,27 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# `SecretBackend`, the word the engine's `SecretStore` trait speaks in.
+gymgar-domain = { workspace = true }
 gymgar-engine = { workspace = true }
+gymgar-garmin = { workspace = true }
+gymgar-secrets = { workspace = true }
 gymgar-store = { workspace = true }
 gymgar-ui-egui = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
-# The session's clock.
+# The session's clock and the time stamps of the log.
 chrono = { workspace = true }
+log = { workspace = true }
+secrecy = { workspace = true }
+# One multi-thread runtime for the Garmin jobs, built by hand: `#[tokio::main]` panics when that fails.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+# A throwaway data directory: the tests never touch the real one.
+tempfile = { workspace = true }
+# A local Garmin for the adapter test, and the fake token it answers with.
+wiremock = { workspace = true }
+base64 = { workspace = true }
+# `time` for a job that waits on the runtime's timer.
+tokio = { workspace = true, features = ["time"] }

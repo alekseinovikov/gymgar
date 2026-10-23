@@ -56,6 +56,9 @@ pub struct GarminStatusView {
     pub new_key_backend: Option<SecretBackend>,
     /// A key connected now could only go to a file, which needs the user's consent (`allowFileStore`).
     pub file_store_needs_consent: bool,
+    /// Where the file store keeps the key, for the consent warning ("Save the key to ‹path›?"); `None` when this
+    /// session has no secret stores (the CLI).
+    pub file_store_location: Option<String>,
     /// A key check (connect or verify) is in flight.
     pub check_running: bool,
 }
@@ -152,6 +155,7 @@ fn status_view(session: &Session) -> Result<GarminStatusView, EngineError> {
         system_store_available: secrets.is_some_and(|s| s.system.is_some()),
         new_key_backend: secrets.map(SecretStores::new_key_backend),
         file_store_needs_consent: secrets.is_some_and(SecretStores::needs_file_consent),
+        file_store_location: secrets.and_then(|s| s.file.location()),
         check_running: check_running(session),
     })
 }

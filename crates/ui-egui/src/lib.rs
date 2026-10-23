@@ -13,6 +13,7 @@ mod rail;
 mod settings_ui;
 #[cfg(test)]
 mod snapshot_tests;
+mod startup_error;
 pub mod state;
 mod summary_ui;
 #[cfg(test)]
@@ -21,4 +22,5 @@ pub mod theme;
 pub mod widgets;
 
 pub use app::GymgarApp;
+pub use startup_error::StartupErrorApp;
 pub use state::{ConnectForm, Section, UiState};

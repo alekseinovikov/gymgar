@@ -1906,12 +1906,21 @@ dependencies = [
 name = "gymgar"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "chrono",
  "eframe",
  "egui",
+ "gymgar-domain",
  "gymgar-engine",
+ "gymgar-garmin",
+ "gymgar-secrets",
  "gymgar-store",
  "gymgar-ui-egui",
+ "log",
+ "secrecy",
+ "tempfile",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]

@@ -159,7 +159,7 @@ xtask/             cargo xtask ci | layers
 | UI-тесты | `egui_kittest` |
 | Сериализация и схемы | `serde`, `serde_json`, `schemars` |
 | Ошибки | `thiserror` |
-| Логи | `log` (логгер подключает `apps/gymgar`) |
+| Логи | `log`; логгер свой и небольшой (`apps/gymgar/src/logging.rs`: stderr и файл, `RUST_LOG`), потому что `env_logger` и аналогов в дереве нет |
 | Время | `chrono` |
 | HTTP и async (Garmin) | `reqwest` + `tokio`, только вне UI-потока |
 | Разбор `.FIT` (активности) | `fitparser` — кандидат, проверить перед подключением |
