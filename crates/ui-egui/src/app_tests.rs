@@ -403,6 +403,7 @@ fn every_error() -> Vec<EngineError> {
         EngineError::NotConnected,
         EngineError::KeyMissing,
         EngineError::JobPanicked("garmin.connect".into()),
+        EngineError::CommandPanicked("garmin.status".into()),
     ]
 }
 

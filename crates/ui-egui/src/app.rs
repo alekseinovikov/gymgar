@@ -277,7 +277,9 @@ fn error_text(error: &EngineError) -> &'static str {
         EngineError::Store(_) => tl!("Gymgar could not access its data. Check that the disk is available and try again."),
         EngineError::BadParams { .. } => tl!("The value is not valid. Check it and try again."),
         EngineError::Disabled { .. } => tl!("This is not available right now."),
-        EngineError::UnknownCommand(_) | EngineError::AgentNotAllowed(_) | EngineError::JobPanicked(_) => tl!("Something went wrong. Please try again."),
+        EngineError::UnknownCommand(_) | EngineError::AgentNotAllowed(_) | EngineError::JobPanicked(_) | EngineError::CommandPanicked(_) => {
+            tl!("Something went wrong. Please try again.")
+        }
     }
 }
 

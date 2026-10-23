@@ -254,6 +254,7 @@ fn error_kind(error: &EngineError) -> &'static str {
         EngineError::NotConnected => "NotConnected",
         EngineError::KeyMissing => "KeyMissing",
         EngineError::JobPanicked(_) => "JobPanicked",
+        EngineError::CommandPanicked(_) => "CommandPanicked",
     }
 }
 
@@ -590,6 +591,7 @@ mod tests {
             EngineError::NotConnected,
             EngineError::KeyMissing,
             EngineError::JobPanicked("x".into()),
+            EngineError::CommandPanicked("x".into()),
         ];
         let kinds: Vec<String> =
             errors.iter().map(|error| json_of(&outcome_result("x", Err(error.clone())))["error"].as_str().expect("a kind").to_owned()).collect();
@@ -606,7 +608,8 @@ mod tests {
                 "FileStoreConsentRequired",
                 "NotConnected",
                 "KeyMissing",
-                "JobPanicked"
+                "JobPanicked",
+                "CommandPanicked"
             ]
         );
     }

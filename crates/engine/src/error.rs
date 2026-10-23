@@ -38,6 +38,10 @@ pub enum EngineError {
     /// A background job panicked; the panic was caught and turned into this error.
     #[error("background job panicked: {0}")]
     JobPanicked(String),
+    /// A command, or the step that applies a finished job's result, panicked on the session's thread; the panic was
+    /// caught and turned into this error. Holds the command id only: the params, or the job's output, may hold a key.
+    #[error("command {0} panicked")]
+    CommandPanicked(String),
 }
 
 impl From<StoreError> for EngineError {

@@ -6,6 +6,7 @@
 //! server can keep it behind a mutex and run commands on a blocking thread.
 
 use std::future::Future;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -31,16 +32,19 @@ impl Session {
     }
 
     /// Runs command `id`. Checks, in order: the command exists, an agent may run it, it is enabled now; then the
-    /// command parses `params` and runs.
+    /// command parses `params` and runs. A panic in the command is caught and becomes [`EngineError::CommandPanicked`]
+    /// (the last line of defence of CLAUDE.md): the UI calls this on its own thread, where a panic would end the app.
     pub fn execute(&mut self, id: &str, params: Value, caller: Caller) -> Result<Outcome, EngineError> {
         let spec = commands::find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_owned()))?;
         if caller == Caller::Agent && !spec.agent {
             return Err(EngineError::AgentNotAllowed(id.to_owned()));
         }
-        (spec.enabled)(self).map_err(|reason| EngineError::Disabled { cmd: id.to_owned(), reason })?;
-        // Params may hold a secret: only the id is logged.
-        log::debug!("running {id} for {caller:?}");
-        (spec.run)(self, params)
+        guarded(spec.id, || {
+            (spec.enabled)(self).map_err(|reason| EngineError::Disabled { cmd: id.to_owned(), reason })?;
+            // Params may hold a secret: only the id is logged.
+            log::debug!("running {id} for {caller:?}");
+            (spec.run)(self, params)
+        })
     }
 
     /// Whether another connection (another process) committed to the database since the last call. The UI polls
@@ -74,11 +78,12 @@ impl Session {
 
     /// Applies the results of the background jobs that have finished since the last call, on the calling thread,
     /// and returns them in the order they finished. The UI calls this every frame; a job counts as running (and
-    /// keeps commands such as `garmin.connect` disabled) until its result has been applied here.
+    /// keeps commands such as `garmin.connect` disabled) until its result has been applied here. A panic while a
+    /// result is applied becomes [`EngineError::CommandPanicked`] for that job, and the other results still come.
     pub fn poll_jobs(&mut self) -> Vec<JobFinished> {
         let mut finished = Vec::new();
         while let Some((id, command, output)) = self.jobs.take_finished() {
-            let result = output.and_then(|output| output.apply(self));
+            let result = output.and_then(|output| guarded(command, || output.apply(self)));
             if let Err(error) = &result {
                 log::info!("job {} of {command} failed: {error}", id.0);
             }
@@ -116,10 +121,26 @@ impl Session {
     }
 }
 
+/// Runs `f`, the body of command `command` on the session's thread, and turns a panic in it into
+/// [`EngineError::CommandPanicked`]. The panic's message is not kept: it is whatever text the panicking code chose and
+/// may hold the params (a key); the panic hook has already printed it to stderr.
+fn guarded<T>(command: &str, f: impl FnOnce() -> Result<T, EngineError>) -> Result<T, EngineError> {
+    // `AssertUnwindSafe`: the session keeps nothing a half-run command could leave inconsistent in memory (every command
+    // reads its state from the database again), so it stays usable. What a panic can leave half-done is the command's own
+    // work outside one transaction (a key saved, its record not yet): the safety net does not undo that.
+    panic::catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(|_| {
+        log::error!("command {command} panicked");
+        Err(EngineError::CommandPanicked(command.to_owned()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{TestConfig, test_session, test_session_on};
+    use crate::SecretStore;
+    use crate::testing::{TestConfig, connection_at, fixed_clock, save_connection, saved_connection, test_session, test_session_on, test_session_with};
+    use gymgar_domain::SecretBackend;
+    use secrecy::SecretString;
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -155,6 +176,49 @@ mod tests {
         assert!(!session.store_changed(), "a change is reported once");
         // Nothing is cached: the next query sees the other connection's write.
         assert_eq!(session.execute("settings.get", Value::Null, Caller::User), Ok(Outcome::Done(json!({"language": "ru"}))));
+    }
+
+    /// A clock that panics, standing in for any bug in code a command runs.
+    fn broken_clock() -> Arc<dyn Fn() -> DateTime<Utc> + Send + Sync> {
+        Arc::new(|| panic!("the clock broke"))
+    }
+
+    #[test]
+    fn a_panicking_command_is_an_error_and_the_session_keeps_working() {
+        let cfg = TestConfig::default();
+        let (mut session, _) = test_session_with(cfg.clone());
+        // `garmin.status` reads the clock for the expiry warning.
+        session.services.clock = broken_clock();
+        for caller in [Caller::User, Caller::Agent] {
+            assert_eq!(session.execute("garmin.status", Value::Null, caller), Err(EngineError::CommandPanicked("garmin.status".to_owned())));
+        }
+        // Commands that do not need the clock still run, and write to the database.
+        session.execute("settings.setLanguage", json!({"language": "ru"}), Caller::User).unwrap();
+        assert_eq!(session.execute("settings.get", Value::Null, Caller::Agent), Ok(Outcome::Done(json!({"language": "ru"}))));
+        // Once the clock works again, so does the command that panicked.
+        session.services.clock = fixed_clock(cfg.now);
+        assert!(matches!(session.execute("garmin.status", Value::Null, Caller::User), Ok(Outcome::Done(_))));
+    }
+
+    #[test]
+    fn a_panic_while_applying_a_job_is_an_error_and_the_session_keeps_working() {
+        let cfg = TestConfig::default();
+        let (mut session, handles) = test_session_with(cfg.clone());
+        let connection = connection_at(cfg.now, SecretBackend::System);
+        save_connection(&session, &connection);
+        handles.system.as_ref().unwrap().set(&SecretString::from("k-123")).unwrap();
+        // The check itself does not read the clock; recording that Garmin accepted the key does.
+        session.services.clock = broken_clock();
+        let Ok(Outcome::Started(job)) = session.execute("garmin.verify", Value::Null, Caller::User) else { panic!("verify did not start") };
+
+        let finished = session.poll_jobs();
+        assert_eq!(finished, [JobFinished { id: job, command: "garmin.verify", result: Err(EngineError::CommandPanicked("garmin.verify".to_owned())) }]);
+        assert!(session.poll_jobs().is_empty(), "a result is handed out once");
+        // Nothing was recorded, and the check no longer counts as running: another one can start.
+        assert_eq!(saved_connection(&session), Some(connection));
+        session.services.clock = fixed_clock(cfg.now);
+        assert!(matches!(session.execute("garmin.verify", Value::Null, Caller::User), Ok(Outcome::Started(_))));
+        assert!(matches!(session.poll_jobs().as_slice(), [JobFinished { result: Ok(_), .. }]));
     }
 
     #[test]
