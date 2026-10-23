@@ -35,6 +35,14 @@ keyring = "4.2"
 # Secrets never reach Debug/Display/logs; `serde` lets other crates deserialize them (never serialize).
 secrecy = { version = "0.10", features = ["serde"] }
 tempfile = "3"
+# HTTP client for the Garmin APIs (rustls by default). Add features only when a call needs them.
+reqwest = "0.13"
+# Garmin calls run off the UI thread; every crate enables just the tokio features it uses.
+tokio = { version = "1.54", default-features = false }
+# Decodes the JWT payload in garmin::personal::jwt.
+base64 = "0.23"
+# Local mock server for Garmin API tests (tests never reach the real Garmin).
+wiremock = "0.6"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
