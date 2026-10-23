@@ -11,6 +11,10 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+gymgar-engine = { workspace = true }
+gymgar-store = { workspace = true }
 gymgar-ui-egui = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
+# The session's clock.
+chrono = { workspace = true }

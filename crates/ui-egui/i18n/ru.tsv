@@ -1,0 +1,21 @@
+# Russian translations of the interface. One `English<TAB>Russian` pair per line; `#` starts a comment line.
+# The English side is the literal inside `tl!(...)` in the sources, character for character. A `{}` stands for a value
+# filled in at run time and must appear on both sides. A test fails when a `tl!` literal has no line here.
+
+# Navigation
+Summary	Сводка
+Settings	Настройки
+
+# Why a command failed (spec section 2, item 3, for the Garmin failures)
+Garmin did not accept the key. Check that it was copied in full, or create a new one.	Garmin не принял ключ. Проверьте, что он скопирован целиком, или создайте новый.
+Could not reach Garmin. Check your internet connection.	Не удалось связаться с Garmin. Проверьте подключение к интернету.
+Garmin has temporarily limited requests. Try again in a few minutes.	Garmin временно ограничил запросы. Попробуйте через несколько минут.
+Garmin is unavailable right now. Try again later.	Garmin сейчас недоступен. Попробуйте позже.
+The system password store is unavailable. Allow saving the key to a file to continue.	Системное хранилище паролей недоступно. Разрешите сохранить ключ в файл, чтобы продолжить.
+Garmin Connect is not connected.	Garmin Connect не подключён.
+The Garmin key was not found in the password store. Connect Garmin again.	Ключ Garmin не найден в хранилище паролей. Подключите Garmin заново.
+Gymgar could not use the password store. Check that it is unlocked and try again.	Gymgar не смог обратиться к хранилищу паролей. Проверьте, что оно разблокировано, и попробуйте ещё раз.
+Gymgar could not access its data. Check that the disk is available and try again.	Gymgar не смог получить доступ к своим данным. Проверьте, что диск доступен, и попробуйте ещё раз.
+The value is not valid. Check it and try again.	Значение недопустимо. Проверьте его и попробуйте ещё раз.
+This is not available right now.	Сейчас это недоступно.
+Something went wrong. Please try again.	Что-то пошло не так. Попробуйте ещё раз.
