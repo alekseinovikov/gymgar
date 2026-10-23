@@ -34,6 +34,8 @@ impl Class {
 pub const TABLE: &[(&str, Class)] = &[
     ("domain", Class::Layer(0)),
     ("garmin", Class::Standalone),
+    // Secret storage (system keyring + file); standalone so the apps can wrap it in engine adapters.
+    ("secrets", Class::Standalone),
     ("store", Class::Layer(1)),
     ("sync", Class::Layer(2)),
     ("engine", Class::Layer(3)),
