@@ -51,6 +51,8 @@ directories = "6"
 schemars = "1.2"
 # Background jobs are boxed futures run on an injected spawner; `executor` runs them inline in engine test doubles.
 futures = "0.3"
+# Official MCP SDK for gymgar-automation. Crates enable only the features they use (`server`, `transport-io`; `client` in tests).
+rmcp = { version = "3.7", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

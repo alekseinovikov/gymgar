@@ -43,6 +43,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("automation", Class::Layer(4)),
     // apps and tooling
     ("gymgar", Class::Exempt),
+    // `short()` strips the `gymgar-` prefix, so the package `gymgar-cli` is registered as `cli`.
+    ("cli", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 
