@@ -1,0 +1,13 @@
+/target
+target/
+.DS_Store
+*~
+*.log
+
+# Local-only working material (never committed)
+/plan
+/log
+/temp
+/secrets
+.env
+*.token

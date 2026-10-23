@@ -1,0 +1,15 @@
+[package]
+name = "gymgar"
+description = "Gymgar: a desktop gym workout editor that syncs with Garmin Connect"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gymgar-ui-egui = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }

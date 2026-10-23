@@ -1,0 +1,58 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+default-members = ["crates/*", "apps/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[workspace.dependencies]
+# internal
+gymgar-domain = { path = "crates/domain" }
+gymgar-garmin = { path = "crates/garmin" }
+gymgar-store = { path = "crates/store" }
+gymgar-sync = { path = "crates/sync" }
+gymgar-engine = { path = "crates/engine" }
+gymgar-ui-egui = { path = "crates/ui-egui" }
+gymgar-automation = { path = "crates/automation" }
+
+# external
+eframe = { version = "0.37", features = ["persistence"] }
+egui = "0.37"
+egui_kittest = "0.37"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+log = "0.4"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# Never crash: non-test code returns errors instead of panicking (CLAUDE.md › Never crash).
+# clippy.toml relaxes these inside tests only.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+dbg_macro = "deny"
+
+[profile.dev]
+opt-level = 1
+# Keeps file:line in panic backtraces, roughly halves link time. For locals in a debugger:
+# CARGO_PROFILE_DEV_DEBUG=true.
+debug = "line-tables-only"
+
+# egui/wgpu are sluggish unoptimized; our own crates stay fast to compile.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
