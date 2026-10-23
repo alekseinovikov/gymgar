@@ -47,6 +47,10 @@ wiremock = "0.6"
 rusqlite = { version = "0.40", features = ["bundled"] }
 # Per-OS user data directory (where the database and the file secret store live).
 directories = "6"
+# JSON Schema of command parameters: the same schema feeds MCP `inputSchema`, docs and UI forms.
+schemars = "1.2"
+# Background jobs are boxed futures run on an injected spawner; `executor` runs them inline in engine test doubles.
+futures = "0.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
