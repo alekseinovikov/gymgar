@@ -2,3 +2,9 @@
 //!
 //! L0: pure data plus validation. No I/O, no network, no UI, no workspace dependencies.
 //! Units (mass, duration, distance) are typed values, never bare numbers; time goes through `chrono`.
+
+mod garmin;
+mod language;
+
+pub use garmin::{ConnectionStatus, GarminConnection, KeyTerm, SecretBackend, expiry_warning, key_expires_at};
+pub use language::Language;
