@@ -3,8 +3,9 @@
 /// Why a Garmin call failed. The text never contains a key or a token.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GarminError {
-    /// The key cannot be sent as an HTTP header (non-ASCII or control characters). No request was made.
-    #[error("the API key contains characters that are not allowed in an HTTP header")]
+    /// The key contains a byte outside visible ASCII (`0x21..=0x7E`): non-ASCII characters, spaces or control characters.
+    /// Real keys never do, so no request was made.
+    #[error("the API key contains characters other than visible ASCII")]
     InvalidKey,
     /// Garmin refused the key: it expired, was deleted, or was never valid.
     #[error("Garmin rejected the API key (expired, deleted or invalid)")]

@@ -21,6 +21,9 @@ use crate::GarminError;
 
 const TOKEN_PATH: &str = "/personalapitoken-service/personal-api/personal-api-key/token";
 
+/// The bytes a key may consist of: visible ASCII, without space (real keys use `[A-Za-z0-9._-]`).
+const VISIBLE_ASCII: std::ops::RangeInclusive<u8> = 0x21..=0x7E;
+
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Garmin answers with about 1.1 KB; the cap only protects against a broken or hostile server streaming without end.
@@ -53,7 +56,7 @@ pub struct Auth {
 }
 
 impl Auth {
-    /// An `Auth` for the real Garmin Personal API. Fails with [`GarminError::InvalidKey`] if the key cannot be sent in an HTTP header.
+    /// An `Auth` for the real Garmin Personal API. Fails with [`GarminError::InvalidKey`] if the key contains a byte outside visible ASCII (`0x21..=0x7E`).
     pub fn new(key: SecretString) -> Result<Self, GarminError> {
         Self::with_base_url(key, DEFAULT_BASE_URL)
     }
@@ -70,6 +73,10 @@ impl Auth {
 
     fn build(key: SecretString, base_url: &str, timeout: Duration) -> Result<Self, GarminError> {
         // The key is checked here, before any request, and never truncated: real keys are 132 characters.
+        // `HeaderValue::from_str` alone is too lax (it accepts bytes >= 128 and spaces), so only visible ASCII passes.
+        if !key.expose_secret().bytes().all(|byte| VISIBLE_ASCII.contains(&byte)) {
+            return Err(GarminError::InvalidKey);
+        }
         let mut authorization = HeaderValue::from_str(&format!("ApiKey {}", key.expose_secret())).map_err(|_| GarminError::InvalidKey)?;
         authorization.set_sensitive(true);
         let client = reqwest::Client::builder().timeout(timeout).user_agent(concat!("Gymgar/", env!("CARGO_PKG_VERSION"))).build().map_err(network)?;
@@ -333,6 +340,28 @@ mod tests {
         Mock::given(method("POST")).respond_with(ResponseTemplate::new(200)).expect(0).mount(&server).await;
 
         let error = Auth::with_base_url(secret("ключ\nabc"), &server.uri()).unwrap_err();
+
+        assert_eq!(error, GarminError::InvalidKey);
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn cyrillic_only_key_is_invalid_key_without_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(200)).expect(0).mount(&server).await;
+
+        let error = Auth::with_base_url(secret("ключ"), &server.uri()).unwrap_err();
+
+        assert_eq!(error, GarminError::InvalidKey);
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn key_with_inner_space_is_invalid_key_without_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(200)).expect(0).mount(&server).await;
+
+        let error = Auth::with_base_url(secret("abc def"), &server.uri()).unwrap_err();
 
         assert_eq!(error, GarminError::InvalidKey);
         server.verify().await;
