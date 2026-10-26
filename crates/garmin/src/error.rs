@@ -10,6 +10,9 @@ pub enum GarminError {
     /// Garmin refused the key: it expired, was deleted, or was never valid.
     #[error("Garmin rejected the API key (expired, deleted or invalid)")]
     KeyRejected,
+    /// Garmin answered 404: there is nothing at that address, for example an activity file that was deleted.
+    #[error("Garmin has nothing at that address (HTTP 404)")]
+    NotFound,
     /// Garmin answered 429: too many requests.
     #[error("Garmin rate limit reached, try again later")]
     RateLimited,

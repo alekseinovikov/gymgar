@@ -59,6 +59,14 @@ schemars = "1.2"
 futures = "0.3"
 # Official MCP SDK for gymgar-automation. Crates enable only the features they use (`server`, `transport-io`; `client` in tests).
 rmcp = { version = "3.7", default-features = false }
+# Decodes the activity `.FIT` files in garmin::fit; its profile also carries Garmin's exercise catalog.
+fitparser = "0.11"
+# Unpacks the activity file Garmin sends (a ZIP with one `.FIT`); tests also write ZIPs with it. Deflate only, the one method Garmin
+# uses: `deflate-flate2` rather than `deflate`, which would add zopfli and zlib-rs; the deflate backend is chosen by `flate2` below.
+zip = { version = "9.1", default-features = false, features = ["deflate-flate2"] }
+# Not used directly: picks the deflate backend for `zip` (it leaves the choice to us). miniz_oxide is pure Rust and already in the
+# tree through png.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -731,8 +731,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1500,6 +1502,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
+name = "fitparser"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56a834aed7c01a500afb06ebcfde59a4dcfd1de7ce15ae501462934d59655376"
+dependencies = [
+ "chrono",
+ "nom",
+ "serde",
+]
+
+[[package]]
 name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1959,6 +1972,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1968,7 +1982,9 @@ dependencies = [
  "chrono",
  "futures",
  "gymgar-domain",
+ "gymgar-garmin",
  "gymgar-store",
+ "gymgar-sync",
  "log",
  "rusqlite",
  "schemars",
@@ -1985,6 +2001,9 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "chrono",
+ "fitparser",
+ "flate2",
+ "log",
  "reqwest",
  "secrecy",
  "serde",
@@ -1992,6 +2011,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "wiremock",
+ "zip",
 ]
 
 [[package]]
@@ -2019,6 +2039,14 @@ dependencies = [
 [[package]]
 name = "gymgar-sync"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "gymgar-domain",
+ "gymgar-garmin",
+ "log",
+ "serde_json",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "gymgar-ui-egui"
@@ -2875,6 +2903,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys 0.3.1",
+]
+
+[[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -5089,6 +5129,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "typed-path"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce898823d8cd0f028662d2f349694b1af0a5cc9be83f1d213a00d3147445e1e"
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6126,6 +6172,9 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "fitparser",
+ "gymgar-garmin",
  "serde_json",
 ]
 
@@ -6358,6 +6407,22 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "zip"
+version = "9.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2886b00003a72c4ccee3f42cfc34908d33b2508a74d827dc2a4244706475c704"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "getrandom 0.4.3",
+ "indexmap",
+ "memchr",
+ "nix",
+ "typed-path",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

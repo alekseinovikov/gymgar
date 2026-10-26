@@ -254,6 +254,7 @@ fn error_kind(error: &EngineError) -> &'static str {
         EngineError::NotConnected => "NotConnected",
         EngineError::KeyMissing => "KeyMissing",
         EngineError::JobPanicked(_) => "JobPanicked",
+        EngineError::JobDropped(_) => "JobDropped",
         EngineError::CommandPanicked(_) => "CommandPanicked",
     }
 }
@@ -406,7 +407,7 @@ mod tests {
         for visible in ["garmin.status", "settings.get", "settings.setLanguage"] {
             assert!(listed_ids.contains(&visible), "{visible} is missing from {listed_ids:?}");
         }
-        for hidden in ["garmin.connect", "garmin.verify", "garmin.disconnect"] {
+        for hidden in ["garmin.connect", "garmin.verify", "garmin.disconnect", "garmin.sync", "activity.reparse"] {
             assert!(!listed_ids.contains(&hidden), "{hidden} must not be listed: {listed_ids:?}");
         }
         // Whatever the registry marks agent-visible, and exactly that, in registry order.
@@ -456,7 +457,7 @@ mod tests {
     async fn command_run_forbidden_is_tool_error() {
         let (session, handles) = connected_session();
         let (client, _mcp) = start(session).await;
-        for hidden in ["garmin.disconnect", "garmin.connect", "garmin.verify"] {
+        for hidden in ["garmin.disconnect", "garmin.connect", "garmin.verify", "garmin.sync", "activity.reparse"] {
             let result = run(&client, hidden, json!({})).await;
             assert!(is_error(&result), "{hidden}: {result:?}");
             assert!(text(&result).contains("AgentNotAllowed"), "{hidden}: {}", text(&result));
@@ -591,6 +592,7 @@ mod tests {
             EngineError::NotConnected,
             EngineError::KeyMissing,
             EngineError::JobPanicked("x".into()),
+            EngineError::JobDropped("x".into()),
             EngineError::CommandPanicked("x".into()),
         ];
         let kinds: Vec<String> =
@@ -609,8 +611,11 @@ mod tests {
                 "NotConnected",
                 "KeyMissing",
                 "JobPanicked",
+                "JobDropped",
                 "CommandPanicked"
             ]
         );
     }
+
+    mod activity;
 }

@@ -252,3 +252,164 @@ fn a_warning_box_can_hold_more_than_its_text() {
     harness.run();
     assert_eq!(*harness.state(), 1);
 }
+
+#[test]
+fn a_chip_is_a_toggle_that_reports_its_clicks() {
+    let mut harness = ui_harness(
+        |ui, chosen: &mut usize| {
+            ui.horizontal(|ui| {
+                for (index, label) in ["All", "Strength"].into_iter().enumerate() {
+                    if chip(ui, label, *chosen == index).clicked() {
+                        *chosen = index;
+                    }
+                }
+            });
+        },
+        0,
+    );
+    let toggled = |harness: &egui_kittest::Harness<'_, usize>, label: &str| {
+        format!("{:?}", harness.get_by_role_and_label(Role::Button, label).accesskit_node().toggled())
+    };
+    assert_eq!((toggled(&harness, "All").as_str(), toggled(&harness, "Strength").as_str()), ("Some(True)", "Some(False)"));
+    harness.get_by_role_and_label(Role::Button, "Strength").click();
+    harness.run();
+    assert_eq!(*harness.state(), 1);
+    assert_eq!((toggled(&harness, "All").as_str(), toggled(&harness, "Strength").as_str()), ("Some(False)", "Some(True)"));
+    // As high as the metric says, and wider than its text.
+    let rect = harness.get_by_role_and_label(Role::Button, "Strength").rect();
+    assert_eq!(rect.height(), metrics::CHIP_HEIGHT);
+    assert!(rect.width() > 2.0 * metrics::CHIP_PADDING);
+}
+
+#[test]
+fn a_heading_is_a_heading_for_screen_readers() {
+    let harness = ui_harness(|ui, (): &mut ()| heading(ui, "Activities"), ());
+    harness.get_by_role_and_label(Role::Heading, "Activities");
+}
+
+/// Whether a text with `text` was painted, and how: its colour and whether it is struck through.
+fn painted_text(harness: &egui_kittest::Harness<'_, ()>, text: &str) -> Option<(egui::Color32, bool)> {
+    harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+        Shape::Text(shape) if shape.galley.job.text == text => {
+            let format = &shape.galley.job.sections.first()?.format;
+            Some((format.color, format.strikethrough.width > 0.0))
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn a_corrected_set_value_is_accent_with_the_recorded_one_struck_through() {
+    let mut harness = ui_harness(
+        |ui, _: &mut ()| {
+            set_value(ui, "77.5 kg", Some("80"));
+            set_value(ui, "8", None);
+        },
+        (),
+    );
+    harness.run();
+    let t = Tokens::SPORT;
+    assert_eq!(painted_text(&harness, "77.5 kg"), Some((t.accent, false)));
+    assert_eq!(painted_text(&harness, "80"), Some((t.text_dim, true)));
+    assert_eq!(painted_text(&harness, "8"), Some((t.text, false)), "a value as recorded is plain");
+    // Screen readers cannot see a line through a number: they hear what it was.
+    harness.get_by_label("was 80");
+    harness.get_by_label("77.5 kg");
+}
+
+#[test]
+fn a_card_with_a_border_takes_its_colour() {
+    let mut harness = ui_harness(
+        |ui, _: &mut ()| {
+            card_with_border(ui, Tokens::SPORT.warning, |ui| ui.label("x"));
+        },
+        (),
+    );
+    harness.run();
+    let t = Tokens::SPORT;
+    let painted = harness.output().shapes.iter().any(|clipped| {
+        matches!(&clipped.shape, Shape::Rect(rect) if rect.fill == t.card && rect.stroke.color == t.warning && rect.corner_radius == CornerRadius::from(t.radius_card))
+    });
+    assert!(painted, "no card with the warning border was painted");
+}
+
+#[test]
+fn a_number_field_is_named_fits_a_table_line_and_takes_a_few_characters() {
+    let mut harness = ui_harness(
+        |ui, buf: &mut String| {
+            number_field(ui, buf, "Weight");
+        },
+        "80".to_owned(),
+    );
+    let field = harness.get_by_role_and_label(Role::TextInput, "Weight");
+    assert_eq!(field.value().as_deref(), Some("80"));
+    // As high as its text, to fit the line of a table (not a form's 36 points).
+    assert!(field.rect().height() <= crate::theme::metrics::EDIT_ROW_HEIGHT, "{}", field.rect().height());
+    field.set_text_value_accesskit("123456789012345");
+    harness.run();
+    assert_eq!(harness.state().chars().count(), crate::theme::metrics::NUMBER_FIELD_MAX_CHARS);
+}
+
+#[test]
+fn an_option_is_a_toggle_named_by_its_text_and_described_by_its_detail() {
+    let mut harness = ui_harness(
+        |ui, clicks: &mut u32| {
+            *clicks += u32::from(option_row(ui, "Romanian deadlift", Some("14 times"), true).clicked());
+            *clicks += u32::from(option_row(ui, "Bench press", None, false).clicked());
+        },
+        0,
+    );
+    let chosen = harness.get_by_role_and_label(Role::Button, "Romanian deadlift");
+    assert_eq!(format!("{:?}", chosen.accesskit_node().toggled()), "Some(True)");
+    assert_eq!(chosen.accesskit_node().description().as_deref(), Some("14 times"));
+    let other = harness.get_by_role_and_label(Role::Button, "Bench press");
+    assert_eq!(format!("{:?}", other.accesskit_node().toggled()), "Some(False)");
+    other.click();
+    harness.run();
+    assert_eq!(*harness.state(), 1);
+    // The chosen one is on the accent's backing.
+    let t = Tokens::SPORT;
+    let backed = harness.output().shapes.iter().any(|clipped| matches!(&clipped.shape, Shape::Rect(rect) if rect.fill == t.accent_soft));
+    assert!(backed, "no option was painted on the accent's backing");
+}
+
+#[test]
+fn a_list_heading_is_drawn_in_capitals_and_read_as_written() {
+    let harness = ui_harness(|ui, _: &mut ()| list_heading(ui, "Done before"), ());
+    assert_eq!(harness.get_by_label("Done before").accesskit_node().role(), Role::Heading);
+    assert!(painted_text(&harness, "DONE BEFORE").is_some(), "the heading is painted in capitals");
+}
+
+#[test]
+fn a_quiet_button_and_a_toolbar_take_clicks() {
+    let mut harness = ui_harness(
+        |ui, clicks: &mut (u32, u32)| {
+            clicks.0 += u32::from(quiet_button(ui, "+ Add set").clicked());
+            toolbar(ui, |ui| clicks.1 += u32::from(secondary_button(ui, "Cancel").clicked()));
+        },
+        (0, 0),
+    );
+    harness.get_by_role_and_label(Role::Button, "+ Add set").click();
+    harness.run();
+    let cancel = harness.get_by_role_and_label(Role::Button, "Cancel");
+    // The toolbar's buttons are small.
+    assert!(cancel.rect().height() <= crate::theme::metrics::SMALL_CONTROL_HEIGHT + 0.5, "{}", cancel.rect().height());
+    cancel.click();
+    harness.run();
+    assert_eq!(*harness.state(), (1, 1));
+}
+
+#[test]
+fn a_popover_floats_over_the_screen_with_its_corner_where_asked() {
+    let corner = egui::pos2(600.0, 100.0);
+    let mut harness = ui_harness(
+        |ui, _: &mut ()| {
+            popover(ui.ctx(), Id::unique("test-popover"), corner, 200.0, "Choose exercise", |ui| ui.label("Inside"));
+        },
+        (),
+    );
+    harness.run();
+    let inside = harness.get_by_label("Inside").rect();
+    assert!(inside.right() <= corner.x && inside.top() >= corner.y && inside.left() >= corner.x - 240.0, "{inside:?}");
+    harness.get_by_label("Choose exercise");
+}

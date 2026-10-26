@@ -36,6 +36,14 @@ fn unexpected(reason: &str) -> GarminError {
     GarminError::UnexpectedResponse(reason.to_owned())
 }
 
+/// `header.payload.signature` in base64url with only `exp` in the payload that matters; for tests that need a token Garmin would issue.
+#[cfg(test)]
+pub(crate) fn fake_jwt(exp: i64) -> String {
+    let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"JWT"}"#);
+    let payload = URL_SAFE_NO_PAD.encode(format!(r#"{{"iss":"garmin","exp":{exp}}}"#));
+    format!("{header}.{payload}.c2lnbmF0dXJl")
+}
+
 #[cfg(test)]
 mod tests {
     use base64::Engine;

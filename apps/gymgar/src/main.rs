@@ -2,17 +2,23 @@
 //!
 //! What goes wrong before the window exists (no data directory, a database that cannot be opened, no runtime) is shown
 //! in a window of its own with the reason, not as a panic or a silent exit: the user's workouts live in that database.
+//!
+//! A release build asks the system secret store once whether it works, before the window exists and on a thread of its
+//! own ([`probe_before_window`]): the system may hold the probe while it asks the user for access.
 
 mod logging;
 mod services;
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
+use std::thread;
 use std::time::Duration;
 
 use eframe::NativeOptions;
 use egui::ViewportBuilder;
 use gymgar_engine::Session;
+use gymgar_secrets::SystemStore;
 use gymgar_store::{Store, StoreError, paths};
 use gymgar_ui_egui::{GymgarApp, StartupErrorApp, UiState, icons, theme};
 
@@ -46,7 +52,7 @@ fn main() -> eframe::Result {
     };
     log::info!("data directory: {}", data_dir.display());
 
-    let result = run_app(&data_dir, store, &runtime);
+    let result = run_app(&data_dir, store, &runtime, system_store_works());
     runtime.shutdown_timeout(SHUTDOWN_WAIT);
     result
 }
@@ -75,8 +81,43 @@ fn open_store(data_dir: Result<PathBuf, StoreError>) -> Result<(PathBuf, Store),
     }
 }
 
-/// The main window: the engine session on the database, with the platform services.
-fn run_app(data_dir: &Path, store: Store, runtime: &tokio::runtime::Runtime) -> eframe::Result {
+/// Whether the system secret store works on this machine. Only a release build asks; a debug build never touches the
+/// keychain, not even to ask, so macOS does not ask for access after every rebuild.
+fn system_store_works() -> bool {
+    if cfg!(debug_assertions) {
+        return false;
+    }
+    // The probe has no time limit (the system may wait for the user to allow access), so a start that seems stuck says why.
+    log::info!("checking the system secret store; the window opens once the system answers");
+    probe_before_window(SystemStore::is_available)
+}
+
+/// Runs `probe` (whether the system secret store works) on a thread of its own and waits for its answer. It is called
+/// before the window is created: the probe writes to the store, which may wait while the system asks the user for
+/// access, and that wait must not happen on the thread that will run the window's event loop. A probe that panics
+/// answers "no"; if no thread can be started, the probe runs here, since no window exists yet that it could hold up.
+fn probe_before_window(probe: impl FnOnce() -> bool + Send) -> bool {
+    let probe = Mutex::new(Some(probe));
+    // Takes the probe out before running it, so it runs once, wherever it ends up running.
+    let run = || {
+        let taken = probe.lock().unwrap_or_else(PoisonError::into_inner).take();
+        taken.is_some_and(|probe| probe())
+    };
+    thread::scope(|scope| match thread::Builder::new().name("gymgar-keychain-probe".to_owned()).spawn_scoped(scope, run) {
+        Ok(handle) => handle.join().unwrap_or_else(|_| {
+            log::error!("the system secret store probe panicked; the system store is not used in this run");
+            false
+        }),
+        Err(error) => {
+            log::warn!("cannot start a thread for the system secret store probe ({error}); probing on the main thread");
+            run()
+        }
+    })
+}
+
+/// The main window: the engine session on the database, with the platform services. `system_store_works` is what the
+/// probe of the system secret store found out.
+fn run_app(data_dir: &Path, store: Store, runtime: &tokio::runtime::Runtime, system_store_works: bool) -> eframe::Result {
     let options = NativeOptions {
         viewport: ViewportBuilder::default().with_title("Gymgar").with_app_id("gymgar").with_inner_size([1200.0, 800.0]).with_min_inner_size([800.0, 500.0]),
         persistence_path: Some(ui_state_path(data_dir)),
@@ -88,7 +129,7 @@ fn run_app(data_dir: &Path, store: Store, runtime: &tokio::runtime::Runtime) -> 
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx, &theme::Tokens::SPORT);
             icons::install(&cc.egui_ctx);
-            let services = services::build(data_dir, cc.egui_ctx.clone(), runtime);
+            let services = services::build(data_dir, system_store_works, cc.egui_ctx.clone(), runtime);
             let session = Session::new(store, services);
             Ok(Box::new(GymgarApp::new(session, UiState::load(cc.storage))))
         }),
@@ -128,6 +169,24 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    #[test]
+    fn the_keychain_probe_runs_off_the_calling_thread() {
+        let ran_on = Mutex::new(None);
+        let answer = probe_before_window(|| {
+            *ran_on.lock().unwrap() = Some(thread::current().id());
+            true
+        });
+        assert!(answer, "the probe's answer is passed on");
+        let ran_on = ran_on.into_inner().unwrap().expect("the probe ran");
+        assert_ne!(ran_on, thread::current().id(), "the probe ran on the main thread");
+        assert!(!probe_before_window(|| false), "the probe's answer is passed on");
+    }
+
+    #[test]
+    fn a_keychain_probe_that_panics_means_no_system_store() {
+        assert!(!probe_before_window(|| panic!("the keychain probe broke")));
+    }
 
     #[test]
     fn the_window_state_lives_in_the_data_directory() {

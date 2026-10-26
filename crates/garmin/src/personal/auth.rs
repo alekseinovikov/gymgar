@@ -4,18 +4,17 @@
 //! cached in memory only (never written anywhere) and, like the key, never reaches `Debug`, `Display` or error text.
 //!
 //! A 401 on the exchange is reported as [`GarminError::KeyRejected`] and not retried. Retrying a data request after a 401
-//! belongs to the first data request and is added together with it.
+//! (one more exchange, then the request again) lives in [`Client`](super::Client), which owns an `Auth`.
 
-use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
 use chrono::{DateTime, TimeDelta, Utc};
-use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 use tokio::sync::Mutex;
 
+use super::http::{REQUEST_TIMEOUT, http_client, network, read_capped, status_error};
 use super::{DEFAULT_BASE_URL, jwt};
 use crate::GarminError;
 
@@ -23,8 +22,6 @@ const TOKEN_PATH: &str = "/personalapitoken-service/personal-api/personal-api-ke
 
 /// The bytes a key may consist of: visible ASCII, without space (real keys use `[A-Za-z0-9._-]`).
 const VISIBLE_ASCII: std::ops::RangeInclusive<u8> = 0x21..=0x7E;
-
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Garmin answers with about 1.1 KB; the cap only protects against a broken or hostile server streaming without end.
 const MAX_BODY_BYTES: usize = 16 * 1024;
@@ -39,6 +36,7 @@ pub struct TokenInfo {
     pub expires_at: DateTime<Utc>,
 }
 
+#[derive(Clone)]
 struct CachedToken {
     token: SecretString,
     expires_at: DateTime<Utc>,
@@ -79,20 +77,28 @@ impl Auth {
         }
         let mut authorization = HeaderValue::from_str(&format!("ApiKey {}", key.expose_secret())).map_err(|_| GarminError::InvalidKey)?;
         authorization.set_sensitive(true);
-        let client = reqwest::Client::builder().timeout(timeout).user_agent(concat!("Gymgar/", env!("CARGO_PKG_VERSION"))).build().map_err(network)?;
+        let client = http_client(timeout)?;
         Ok(Self { client, token_url: format!("{}{TOKEN_PATH}", base_url.trim_end_matches('/')), authorization, cache: Mutex::new(None) })
     }
 
     /// Always asks Garmin for a new token and caches it, replacing the previous one.
     pub async fn exchange(&self) -> Result<TokenInfo, GarminError> {
+        self.exchange_token().await.map(|(_, info)| info)
+    }
+
+    /// Like [`Auth::exchange`], and also hands back the token it got. A caller that must use exactly that token cannot ask
+    /// [`Auth::token`] for it afterwards: a token with under an hour left is not served from the cache but exchanged again.
+    pub(super) async fn exchange_token(&self) -> Result<(SecretString, TokenInfo), GarminError> {
         let mut cache = self.cache.lock().await;
-        let fresh = self.request_token().await?;
-        let info = TokenInfo { expires_at: fresh.expires_at };
-        *cache = Some(fresh);
-        Ok(info)
+        let fresh = self.refresh(&mut cache).await?;
+        Ok((fresh.token, TokenInfo { expires_at: fresh.expires_at }))
     }
 
     /// The cached token while more than an hour of it is left, otherwise a newly exchanged one.
+    ///
+    /// If the exchange fails because Garmin or the network is not answering (`Network`, `RateLimited`, `Unavailable`) and the cached
+    /// token has not expired yet, that token is returned: it still works, and a hiccup in the refresh should not stop a download.
+    /// If Garmin rejects the key, the cached token is dropped and the error is passed on.
     pub async fn token(&self) -> Result<SecretString, GarminError> {
         let mut cache = self.cache.lock().await;
         if let Some(cached) = cache.as_ref()
@@ -100,10 +106,31 @@ impl Auth {
         {
             return Ok(cached.token.clone());
         }
-        let fresh = self.request_token().await?;
-        let token = fresh.token.clone();
-        *cache = Some(fresh);
-        Ok(token)
+        match self.refresh(&mut cache).await {
+            Ok(fresh) => Ok(fresh.token),
+            Err(error @ (GarminError::Network(_) | GarminError::RateLimited | GarminError::Unavailable { .. })) => match cache.as_ref() {
+                Some(cached) if cached.expires_at > Utc::now() => Ok(cached.token.clone()),
+                _ => Err(error),
+            },
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Asks Garmin for a token and stores it in `cache`. Takes the guard so that `token` can keep holding the lock from its
+    /// freshness check through the exchange. A rejected key empties the cache: the token it holds came from that key.
+    async fn refresh(&self, cache: &mut Option<CachedToken>) -> Result<CachedToken, GarminError> {
+        match self.request_token().await {
+            Ok(fresh) => {
+                *cache = Some(fresh.clone());
+                Ok(fresh)
+            }
+            Err(error) => {
+                if error == GarminError::KeyRejected {
+                    *cache = None;
+                }
+                Err(error)
+            }
+        }
     }
 
     async fn request_token(&self) -> Result<CachedToken, GarminError> {
@@ -113,7 +140,8 @@ impl Auth {
         if !status.is_success() {
             return Err(status_error(status));
         }
-        let body = read_body(response).await?;
+        let body = read_capped(response, MAX_BODY_BYTES).await?;
+        let body = String::from_utf8(body).map_err(|_| GarminError::UnexpectedResponse("the token response is not valid UTF-8".to_owned()))?;
         let token = body.trim();
         let expires_at = jwt::expires_at(token)?;
         Ok(CachedToken { token: SecretString::from(token), expires_at })
@@ -126,63 +154,17 @@ impl fmt::Debug for Auth {
     }
 }
 
-fn status_error(status: StatusCode) -> GarminError {
-    if status == StatusCode::UNAUTHORIZED {
-        GarminError::KeyRejected
-    } else if status == StatusCode::TOO_MANY_REQUESTS {
-        GarminError::RateLimited
-    } else if status.is_server_error() {
-        GarminError::Unavailable { status: status.as_u16() }
-    } else {
-        GarminError::UnexpectedResponse(format!("HTTP {}", status.as_u16()))
-    }
-}
-
-/// The body as text, refusing more than [`MAX_BODY_BYTES`]. The request timeout bounds how long this can take.
-async fn read_body(mut response: reqwest::Response) -> Result<String, GarminError> {
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(network)? {
-        if body.len().saturating_add(chunk.len()) > MAX_BODY_BYTES {
-            return Err(GarminError::UnexpectedResponse("the token response is too large".to_owned()));
-        }
-        body.extend_from_slice(&chunk);
-    }
-    String::from_utf8(body).map_err(|_| GarminError::UnexpectedResponse("the token response is not valid UTF-8".to_owned()))
-}
-
-/// The error and its causes on one line ("error sending request: ...: Connection refused"): the top-level text alone says
-/// nothing useful. Neither the key nor the token can be in there: they only ever sit in a header value, which HTTP errors do not echo.
-fn network(error: reqwest::Error) -> GarminError {
-    let error = error.without_url();
-    let mut text = error.to_string();
-    let mut cause = error.source();
-    while let Some(next) = cause {
-        text.push_str(": ");
-        text.push_str(&next.to_string());
-        cause = next.source();
-    }
-    GarminError::Network(text)
-}
-
 #[cfg(test)]
 mod tests {
-    use base64::Engine;
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use secrecy::ExposeSecret;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    use super::jwt::fake_jwt;
     use super::*;
 
     const TOKEN_PATH: &str = "/personalapitoken-service/personal-api/personal-api-key/token";
     const KEY: &str = "k-123";
-
-    /// `header.payload.signature` in base64url, with only `exp` in the payload that matters.
-    fn fake_jwt(exp: i64) -> String {
-        let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"JWT"}"#);
-        let payload = URL_SAFE_NO_PAD.encode(format!(r#"{{"iss":"garmin","exp":{exp}}}"#));
-        format!("{header}.{payload}.c2lnbmF0dXJl")
-    }
 
     fn secret(key: &str) -> SecretString {
         SecretString::from(key.to_owned())
@@ -293,7 +275,7 @@ mod tests {
     async fn exchange_oversized_body_is_unexpected() {
         let server = server_answering(ResponseTemplate::new(200).set_body_string("a".repeat(1024 * 1024))).await;
         match auth_for(&server).exchange().await.unwrap_err() {
-            GarminError::UnexpectedResponse(reason) => assert!(reason.contains("too large"), "{reason}"),
+            GarminError::UnexpectedResponse(reason) => assert!(reason.contains("larger than"), "{reason}"),
             other => panic!("expected UnexpectedResponse, got {other:?}"),
         }
     }
@@ -449,6 +431,85 @@ mod tests {
 
         assert!(a.is_ok() && b.is_ok() && c.is_ok());
         server.verify().await;
+    }
+
+    /// A server whose first exchange succeeds with `first_token` and whose later exchanges all answer `then`.
+    async fn server_answering_once_then(first_token: String, then: ResponseTemplate) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(TOKEN_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_string(first_token))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST")).and(path(TOKEN_PATH)).respond_with(then).mount(&server).await;
+        server
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_uses_the_cached_token_while_it_is_still_valid() {
+        let short_lived = fake_jwt(now_plus(chrono::TimeDelta::minutes(30)));
+        for failure in [ResponseTemplate::new(503), ResponseTemplate::new(429)] {
+            let server = server_answering_once_then(short_lived.clone(), failure).await;
+            let auth = auth_for(&server);
+            auth.exchange().await.unwrap();
+
+            // Under the one-hour margin, so `token()` tries to refresh, fails, and falls back to the token that still works.
+            let token = auth.token().await.unwrap();
+
+            assert_eq!(token.expose_secret(), short_lived);
+            assert_eq!(server.received_requests().await.unwrap().len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_network_failure_uses_cached_token() {
+        let short_lived = fake_jwt(now_plus(chrono::TimeDelta::minutes(30)));
+        let slow = ResponseTemplate::new(200).set_body_string(fake_jwt(1_900_000_000)).set_delay(Duration::from_secs(2));
+        let server = server_answering_once_then(short_lived.clone(), slow).await;
+        let auth = Auth::with_timeout(secret(KEY), &server.uri(), Duration::from_secs(1)).unwrap();
+        auth.exchange().await.unwrap();
+
+        let token = auth.token().await.unwrap();
+
+        assert_eq!(token.expose_secret(), short_lived);
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_with_an_expired_cached_token_is_an_error() {
+        let expired = fake_jwt(now_plus(chrono::TimeDelta::minutes(-10)));
+        let server = server_answering_once_then(expired, ResponseTemplate::new(503)).await;
+        let auth = auth_for(&server);
+        auth.exchange().await.unwrap();
+
+        assert_eq!(auth.token().await.unwrap_err(), GarminError::Unavailable { status: 503 });
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_without_a_cached_token_is_an_error() {
+        let server = server_answering(ResponseTemplate::new(503)).await;
+
+        assert_eq!(auth_for(&server).token().await.unwrap_err(), GarminError::Unavailable { status: 503 });
+    }
+
+    #[tokio::test]
+    async fn refresh_key_rejected_clears_the_cache_and_reports_it() {
+        let short_lived = fake_jwt(now_plus(chrono::TimeDelta::minutes(30)));
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(TOKEN_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_string(short_lived))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST")).and(path(TOKEN_PATH)).respond_with(ResponseTemplate::new(401)).up_to_n_times(1).mount(&server).await;
+        Mock::given(method("POST")).and(path(TOKEN_PATH)).respond_with(ResponseTemplate::new(503)).mount(&server).await;
+        let auth = auth_for(&server);
+        auth.exchange().await.unwrap();
+
+        assert_eq!(auth.token().await.unwrap_err(), GarminError::KeyRejected);
+        // The cached token is gone: this refresh fails too, and there is nothing to fall back to.
+        assert_eq!(auth.token().await.unwrap_err(), GarminError::Unavailable { status: 503 });
     }
 
     #[tokio::test]

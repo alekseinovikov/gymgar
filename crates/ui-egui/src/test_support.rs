@@ -1,15 +1,18 @@
 //! Helpers the UI tests share: a headless harness with the Sport theme and the icons installed, an app on the engine's
 //! test doubles, and the few gestures every screen test makes. Compiled for tests only.
 
-use chrono::FixedOffset;
+use chrono::{DateTime, FixedOffset, Utc};
 use egui::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::{Harness, HarnessBuilder};
-use gymgar_domain::{GarminConnection, SecretBackend};
-use gymgar_engine::Outcome;
-use gymgar_engine::testing::{TestConfig, TestHandles, connection_at, save_connection, test_session_with};
+use gymgar_domain::{ActivityId, ActivitySummary, GarminConnection, STRENGTH_TYPE_KEY, SecretBackend};
+use gymgar_engine::testing::{TestConfig, TestHandles, connection_at, save_connection, seed_fixture_activities, test_session_on};
+use gymgar_engine::{Outcome, SecretStore, Session};
+use gymgar_store::{NewActivity, Store};
+use secrecy::SecretString;
 use serde_json::json;
 
+use crate::app::Startup;
 use crate::i18n::Lang;
 use crate::theme::{self, Tokens};
 use crate::{GymgarApp, Section, UiState, icons};
@@ -38,38 +41,96 @@ pub(crate) fn harness(app: GymgarApp) -> Harness<'static, GymgarApp> {
     ui_harness(|ui, app: &mut GymgarApp| app.show(ui), app)
 }
 
+/// A harness showing the whole app in a window of `size`: a tall one shows a long list whole.
+pub(crate) fn harness_sized(app: GymgarApp, size: egui::Vec2) -> Harness<'static, GymgarApp> {
+    builder().with_size(size).build_ui_state(|ui, app: &mut GymgarApp| app.show(ui), app)
+}
+
 /// An app on a fresh in-memory database and the doubles from `cfg`, with the interface language "system" on an
-/// English machine. Dates are shown in UTC. It has not ticked yet, so a connection it finds is checked at the first tick.
+/// English machine. Dates are shown in UTC, at the config's time. It has not ticked yet, so a connection it finds starts the
+/// import at the first tick.
 pub(crate) fn app(cfg: TestConfig) -> (GymgarApp, TestHandles) {
     app_on_machine(TEST_LOCALE, cfg, None, false)
 }
 
 /// Like [`app`], with the interface language "system" on a machine in `lang`, and a window that has been open a while:
-/// the check that the app makes of a saved connection when it starts is over (there was none to check).
+/// the import that the app starts when it opens is over (there was nothing to import from).
 pub(crate) fn app_in(lang: Lang, cfg: TestConfig) -> (GymgarApp, TestHandles) {
     app_on_machine(locale(lang), cfg, None, true)
 }
 
 /// Like [`app_in`], with `connection` already saved in the database, as an earlier run of the app would have left it.
-/// The start-up check is over: this window has been open a while, and its ticks start nothing by themselves.
+/// The start-up import is over: this window has been open a while, and its ticks start nothing by themselves.
 pub(crate) fn app_connected(lang: Lang, cfg: TestConfig, connection: &GarminConnection) -> (GymgarApp, TestHandles) {
     app_on_machine(locale(lang), cfg, Some(connection), true)
 }
 
-/// Like [`app_connected`], for the moment the app has just been opened: its first tick checks the saved key.
-pub(crate) fn app_just_opened(lang: Lang, cfg: TestConfig, connection: &GarminConnection) -> (GymgarApp, TestHandles) {
-    app_on_machine(locale(lang), cfg, Some(connection), false)
+/// A window open a while (the start-up import is over) on a database that holds a working connection when `connected`,
+/// whatever `prepare` writes to it before the window opens, and the activities of the engine's fixtures: eight of five
+/// types, none new, the newest strength one with its sets. The key of the connection is in the file store, so a sync
+/// can run.
+pub(crate) fn app_seeded(lang: Lang, cfg: TestConfig, connected: bool, prepare: impl FnOnce(&Store)) -> (GymgarApp, TestHandles) {
+    let (app, handles, ()) = app_seeded_with(lang, cfg, connected, prepare, |_| ());
+    (app, handles)
+}
+
+/// Like [`app_seeded`], and `seed` runs on the session after the fixtures, for what the engine's own helpers write
+/// (`seed_strength`); what it returns comes back with the app.
+pub(crate) fn app_seeded_with<T>(
+    lang: Lang,
+    cfg: TestConfig,
+    connected: bool,
+    prepare: impl FnOnce(&Store),
+    seed: impl FnOnce(&Session) -> T,
+) -> (GymgarApp, TestHandles, T) {
+    let store = Store::open_in_memory().expect("an in-memory store");
+    prepare(&store);
+    let connection = connected.then(|| working_connection(&cfg));
+    let (session, handles) = test_session_on(store, cfg.clone());
+    if let Some(connection) = &connection {
+        save_connection(&session, connection);
+        handles.file.set(&SecretString::from("the-saved-key")).expect("save the key");
+    }
+    seed_fixture_activities(&session);
+    let seeded = seed(&session);
+    (open(session, locale(lang), &cfg, true), handles, seeded)
+}
+
+/// An activity as a sync stores it: an hour long, and 5.2 km unless it is a strength one.
+pub(crate) fn listed(id: i64, type_key: &str, name: Option<&str>, start: DateTime<Utc>, is_new: bool) -> NewActivity {
+    let summary = ActivitySummary {
+        id: ActivityId(id),
+        type_key: type_key.to_owned(),
+        name: name.map(str::to_owned),
+        start,
+        duration_ms: Some(3_600_000),
+        distance_m: (type_key != STRENGTH_TYPE_KEY).then_some(5_200.0),
+        avg_hr: None,
+        calories: None,
+        manual: false,
+    };
+    NewActivity { summary, raw_json: json!({ "activityId": id }).to_string(), is_new }
+}
+
+/// Stores `activities` as a sync would have.
+pub(crate) fn store_activities(store: &Store, activities: &[NewActivity]) {
+    store.upsert_activities(activities, TestConfig::default().now).expect("store the activities");
 }
 
 /// Like [`app_in`], connected the way the user does it: `key` was entered and Garmin accepted it, so the key is in the
-/// secret store the rules choose. Needs `cfg.deferred` off, so the check runs at once.
+/// secret store the rules choose, and the first import that follows a connection (Ruling 19) is over. Needs
+/// `cfg.deferred` off, so the check and the import run at once.
 pub(crate) fn app_with_key(lang: Lang, cfg: TestConfig, key: &str) -> (GymgarApp, TestHandles) {
     let (mut app, handles) = app_in(lang, cfg);
     let started = app.run("garmin.connect", json!({ "apiKey": key, "keyTerm": 365, "allowFileStore": true }));
     let Ok(Outcome::Started(job)) = started else { panic!("connecting did not start: {started:?}") };
     app.ui.connect.pending = Some(job);
-    app.tick(&egui::Context::default());
+    let ctx = egui::Context::default();
+    app.tick(&ctx);
     assert!(app.status().is_some_and(|status| status.status == gymgar_domain::ConnectionStatus::Connected), "Garmin did not accept the key");
+    // The import ran inline when the connection was applied; this applies its end.
+    app.tick(&ctx);
+    assert!(app.status().is_some_and(|status| !status.sync.running), "the first import is over");
     (app, handles)
 }
 
@@ -86,14 +147,22 @@ fn locale(lang: Lang) -> &'static str {
 }
 
 fn app_on_machine(locale: &str, cfg: TestConfig, connection: Option<&GarminConnection>, started: bool) -> (GymgarApp, TestHandles) {
-    let (session, handles) = test_session_with(cfg);
+    let (session, handles) = test_session_on(Store::open_in_memory().expect("an in-memory store"), cfg.clone());
     if let Some(connection) = connection {
         save_connection(&session, connection);
     }
+    (open(session, locale, &cfg, started), handles)
+}
+
+/// The window on `session`, on a machine in `locale`, in UTC and at the config's time. `started`: the start-up import has
+/// been dealt with, so ticks start nothing by themselves.
+fn open(session: Session, locale: &str, cfg: &TestConfig, started: bool) -> GymgarApp {
     let utc = FixedOffset::east_opt(0).expect("UTC is a valid offset");
-    let mut app = GymgarApp::with_system_locale(session, UiState::default(), Some(locale.to_owned())).with_utc_offset(utc);
-    app.verify_started = started;
-    (app, handles)
+    let mut app = GymgarApp::with_system_locale(session, UiState::default(), Some(locale.to_owned())).with_utc_offset(utc).with_time(cfg.now);
+    if started {
+        app.startup = Startup::Done;
+    }
+    app
 }
 
 /// `en` or `ru`, whichever the test is checking: the texts of the screens in each language, written out in the test so

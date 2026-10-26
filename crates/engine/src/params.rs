@@ -32,7 +32,8 @@ pub fn schema<P: JsonSchema>() -> Schema {
     schemars::schema_for!(P)
 }
 
-fn bad_params(cmd: &str, msg: String) -> EngineError {
+/// `BadParams` of command `cmd`: the one error of a value that is wrong, whichever check found it.
+pub(crate) fn bad_params(cmd: &str, msg: String) -> EngineError {
     EngineError::BadParams { cmd: cmd.to_owned(), msg }
 }
 

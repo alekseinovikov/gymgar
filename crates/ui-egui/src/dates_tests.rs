@@ -57,3 +57,63 @@ fn every_month_has_its_own_name_in_both_languages() {
     assert_eq!(english.first().map(String::as_str), Some("1 January 2026"));
     assert_eq!(english.last().map(String::as_str), Some("1 December 2026"));
 }
+
+fn day(year: i32, month: u32, day: u32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(year, month, day).expect("a valid date")
+}
+
+#[test]
+fn a_short_date_is_the_weekday_the_day_and_the_month() {
+    i18n::set_current(Lang::En);
+    assert_eq!(short_date(day(2026, 10, 23)), "Fri, 23 Oct");
+    assert_eq!(short_date(day(2026, 5, 4)), "Mon, 4 May");
+    i18n::set_current(Lang::Ru);
+    assert_eq!(short_date(day(2026, 10, 23)), "Пт, 23 окт");
+    assert_eq!(short_date(day(2026, 5, 4)), "Пн, 4 мая");
+    // Every weekday and every month has its own short name.
+    let week: Vec<String> = (19..=25).map(|d| short_date(day(2026, 10, d))).collect();
+    assert_eq!(week, ["Пн, 19 окт", "Вт, 20 окт", "Ср, 21 окт", "Чт, 22 окт", "Пт, 23 окт", "Сб, 24 окт", "Вс, 25 окт"]);
+    let months: Vec<String> = (1..=12).map(|m| short_date(day(2026, m, 1)).split(' ').next_back().unwrap_or_default().to_owned()).collect();
+    assert_eq!(months, ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]);
+    i18n::set_current(Lang::En);
+    let months: Vec<String> = (1..=12).map(|m| short_date(day(2026, m, 1)).split(' ').next_back().unwrap_or_default().to_owned()).collect();
+    assert_eq!(months, ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]);
+}
+
+#[test]
+fn a_week_starts_on_monday() {
+    assert_eq!(monday_of(day(2026, 10, 19)), day(2026, 10, 19), "a Monday is its own week's start");
+    assert_eq!(monday_of(day(2026, 10, 23)), day(2026, 10, 19));
+    assert_eq!(monday_of(day(2026, 10, 25)), day(2026, 10, 19), "Sunday ends the week");
+    assert_eq!(monday_of(day(2026, 1, 1)), day(2025, 12, 29), "across a year");
+    assert_eq!(monday_of(NaiveDate::MIN), NaiveDate::MIN, "the first day there is: no week before it to go back to");
+}
+
+#[test]
+fn a_week_is_named_by_its_days() {
+    i18n::set_current(Lang::En);
+    assert_eq!(week(day(2026, 10, 12), 2026), "12–18 October");
+    assert_eq!(week(day(2026, 9, 28), 2026), "28 September – 4 October");
+    assert_eq!(week(day(2025, 10, 13), 2026), "13–19 October 2025", "another year says which");
+    assert_eq!(week(day(2025, 12, 29), 2026), "29 December 2025 – 4 January 2026");
+    i18n::set_current(Lang::Ru);
+    assert_eq!(week(day(2026, 10, 12), 2026), "12–18 октября");
+    assert_eq!(week(day(2026, 9, 28), 2026), "28 сентября – 4 октября");
+    assert_eq!(week(day(2025, 12, 29), 2026), "29 декабря 2025 – 4 января 2026");
+    // The last week of the calendar has no Sunday to name: its Monday stands for it.
+    assert!(!week(NaiveDate::MAX, 2026).is_empty());
+}
+
+#[test]
+fn a_long_date_names_the_day_of_the_week() {
+    // The header of an open activity: `Четверг, 23 октября 2026`.
+    let day = |d| NaiveDate::from_ymd_opt(2026, 10, d).expect("a valid date");
+    i18n::set_current(Lang::En);
+    assert_eq!(long_date(day(22)), "Thursday, 22 October 2026");
+    assert_eq!(long_date(day(25)), "Sunday, 25 October 2026");
+    i18n::set_current(Lang::Ru);
+    assert_eq!(long_date(day(22)), "Четверг, 22 октября 2026");
+    assert_eq!(long_date(day(19)), "Понедельник, 19 октября 2026");
+    let week: Vec<String> = (19..=25).map(|d| long_date(day(d))).collect();
+    assert_eq!(week.iter().collect::<std::collections::HashSet<_>>().len(), 7, "{week:?}");
+}

@@ -4,6 +4,7 @@
 
 # Navigation
 Summary	Сводка
+Activities	Тренировки
 Settings	Настройки
 
 # Why a command failed (spec section 2, item 3, for the Garmin failures)
@@ -20,12 +21,18 @@ The value is not valid. Check it and try again.	Значение недопус�
 This is not available right now.	Сейчас это недоступно.
 Something went wrong. Please try again.	Что-то пошло не так. Попробуйте ещё раз.
 
-# Summary (spec section 2, items 1, 5 and 9)
+# Summary (spec section 2, items 1, 5 and 9; activity import spec section 2, item 15). A counted noun has three lines,
+# for trn(): one, the Russian form for 2 to 4 (its English side, marked "(2 to 4)", is never shown) and many.
 Workouts, progress and recovery will appear here	Здесь появятся тренировки, прогресс и восстановление
 Connect to Garmin Connect	Подключите Garmin Connect
 Gymgar takes your workouts, sleep and HRV from Garmin. You need a personal API key, which takes a couple of minutes.	Gymgar берёт ваши тренировки, сон и ВСР из Garmin. Нужен личный ключ API — это займёт пару минут.
 Connect Garmin	Подключить Garmin
-Garmin is connected. Loading workouts will arrive in the next update.	Garmin подключён. Загрузка тренировок появится в следующем обновлении.
+{} new workout	{} новая тренировка
+{} new workouts (2 to 4)	{} новые тренировки
+{} new workouts	{} новых тренировок
+Show new	Показать новые
+Last strength workout	Последняя силовая
+Open	Открыть
 The Garmin key expires on {}. Create a new one	Ключ Garmin истекает {}. Выпустите новый
 Personal API Key page	Страница Personal API Key
 
@@ -65,6 +72,7 @@ Disconnect	Отключить
 Disconnect Garmin? Gymgar will delete the key and the connection details.	Отключить Garmin? Gymgar удалит ключ и сведения о подключении.
 Yes, disconnect	Да, отключить
 A key check is running. Try again in a moment.	Идёт проверка ключа. Попробуйте через минуту.
+Workouts are loading from Garmin. Try again when it ends.	Идёт загрузка тренировок из Garmin. Попробуйте, когда она закончится.
 Gymgar cannot reach the password store that holds the key, so it cannot disconnect now.	Gymgar не может обратиться к хранилищу паролей, где лежит ключ, поэтому сейчас не может отключить Garmin.
 
 # Settings, the language card (item 10). "English" and "Русский" are not here: a language is named in itself, in every
@@ -85,6 +93,133 @@ September	сентября
 October	октября
 November	ноября
 December	декабря
+
+# Short months and days, as in "Thu, 23 Oct" in the activity list. "May" is the line of the full name above: Russian
+# writes "мая" in both.
+Jan	янв
+Feb	фев
+Mar	мар
+Apr	апр
+Jun	июн
+Jul	июл
+Aug	авг
+Sep	сен
+Oct	окт
+Nov	ноя
+Dec	дек
+Mon	Пн
+Tue	Вт
+Wed	Ср
+Thu	Чт
+Fri	Пт
+Sat	Сб
+Sun	Вс
+
+# Days of the week as they begin the date of the open activity: "Четверг, 23 октября 2026"
+Monday	Понедельник
+Tuesday	Вторник
+Wednesday	Среда
+Thursday	Четверг
+Friday	Пятница
+Saturday	Суббота
+Sunday	Воскресенье
+
+# Numbers with units (activity import spec section 2, item 17)
+{} kg	{} кг
+{} km	{} км
+
+# The Activities screen (activity import spec section 2, items 5 to 7 and 16)
+Refresh	Обновить
+Select an activity	Выберите тренировку
+Loading workouts from Garmin…	Загружаю тренировки из Garmin…
+No workouts yet. Refresh loads them from Garmin.	Тренировок пока нет. «Обновить» загрузит их из Garmin.
+Loading…	Загружаю…
+Loading: {} of {}	Загружаю: {} из {}
+Loaded today at {}	Загружено сегодня в {}
+Loaded {}	Загружено {}
+Open Settings	Открыть настройки
+All	Все
+Strength	Силовые
+New · {}	Новые · {}
+No workouts here	Здесь тренировок нет
+This week	Эта неделя
+not counted	не учитывается
+{} set	{} подход
+{} sets (2 to 4)	{} подхода
+{} sets	{} подходов
+
+# The open activity (activity import spec section 2, items 7, 8, 12, 13 and 16)
+following the program “{}”	по программе «{}»
+Don't count this workout	Не учитывать тренировку
+Count this workout	Учитывать тренировку
+Time	Время
+Sets	Подходов
+Distance	Дистанция
+Avg HR	Пульс ср.
+Calories	Калории
+Sets are loading…	Подходы загружаются…
+The recording has no sets	В записи нет подходов
+Could not read the watch recording	Не удалось прочитать запись часов
+No exercise	Без упражнения
+Choose exercise	Указать упражнение
+plan {}	план {}
+Weight	Вес
+Reps	Повторы
+Plan	План
+HR	Пульс
+Rest	Отдых
+added	добавлен
+empty, not counted	пустой, не учитывается
+restore	вернуть
+count it	учитывать
+was {}	было {}
+
+# Correcting a set, the exercise picker and adding a set (activity import spec section 2, items 9 to 11)
+Edit set {}	Изменить подход {}
+kg	кг
+Save	Сохранить
+Reset to watch values	Вернуть как на часах
+Remove	Убрать
+Don't count this set	Не учитывать подход
+Count	Учитывать
+Other exercise…	Другое упражнение…
+Enter a weight from 0 to 1000 kg.	Введите вес от 0 до 1000 кг.
+Enter a whole number of reps from 0 to 1000.	Введите целое число повторов от 0 до 1000.
++ Add set	+ Добавить подход
+Search exercises	Поиск упражнения
+Done before	Вы делали
+Garmin catalog	Каталог Garmin
+{} time	{} раз
+{} times (2 to 4)	{} раза
+{} times	{} раз
+For all sets of the card	Для всех подходов карточки
+Choose	Выбрать
+Nothing found	Ничего не найдено
+Type the name of an exercise	Введите название упражнения
+
+# Why the last sync brought nothing more (activity import spec section 7, «Ошибки загрузки»)
+Garmin does not accept the key. Replace it in Settings.	Garmin не принимает ключ. Замените его в Настройках.
+The Garmin key was not found. Connect Garmin again.	Ключ Garmin не найден. Подключите Garmin заново.
+Garmin has temporarily limited requests. Will continue later.	Garmin временно ограничил запросы. Продолжу позже.
+No connection to Garmin. Showing what is already loaded.	Нет связи с Garmin. Показываю то, что уже загружено.
+Garmin is unavailable right now. Will continue later.	Garmin сейчас недоступен. Продолжу позже.
+Could not save part of what Garmin sent. Will try again later.	Не удалось сохранить загруженное. Продолжу позже.
+
+# Garmin's activity types; any other is shown as its key, made readable
+Strength training	Силовая тренировка
+Running	Бег
+Treadmill running	Бег на дорожке
+Cycling	Велосипед
+Indoor cycling	Велотренажёр
+Pilates	Пилатес
+Walking	Ходьба
+Swimming	Плавание
+Pool swimming	Плавание в бассейне
+Hiking	Пеший туризм
+Yoga	Йога
+Cardio	Кардио
+HIIT	ВИИТ
+Indoor rowing	Гребной тренажёр
 
 # The window shown when Gymgar cannot start
 Gymgar cannot start	Gymgar не может запуститься

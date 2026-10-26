@@ -1,17 +1,20 @@
-//! Tests of the Garmin commands. Key checks run on the inline spawner of `testing` unless a test needs a job in flight
-//! (`deferred`); either way a result is applied only by `Session::poll_jobs`.
+//! Tests of the Garmin commands. Jobs run on the inline spawner of `testing` unless a test needs a job in flight
+//! (`deferred`); either way a result is applied only by `Session::poll_jobs`. The tests that check where a secret store
+//! is touched run the deferred jobs on another thread, as the app's runtime does.
 
 use super::*;
 use crate::testing::{
-    TEST_FILE_STORE_LOCATION, TestConfig, connection_at, fixed_clock, save_connection, saved_connection, stored_key, test_session, test_session_on,
-    test_session_with,
+    DeferredSpawner, RecordingSleep, SecretOp, TEST_FILE_STORE_LOCATION, TestConfig, connection_at, fixed_clock, poll_finished, save_connection,
+    saved_connection, stored_key, test_session, test_session_on, test_session_with,
 };
-use crate::{Caller, JobFinished, Services, commands};
+use crate::{Caller, JobFinished, Services, SyncStatusView, commands};
 use chrono::Duration;
 use gymgar_store::Store;
 use secrecy::SecretString;
 use serde_json::json;
+use std::path::Path;
 use std::sync::atomic::Ordering;
+use std::thread::{self, ThreadId};
 use tempfile::TempDir;
 
 fn read_status(session: &mut Session, caller: Caller) -> GarminStatusView {
@@ -23,7 +26,14 @@ fn read_status(session: &mut Session, caller: Caller) -> GarminStatusView {
 
 /// The services of `gymgar-cli`: no secret stores, no Garmin, no spawner.
 fn headless_session() -> Session {
-    let services = Services { secrets: None, garmin: None, spawner: None, notify: Arc::new(|| {}), clock: fixed_clock(TestConfig::default().now) };
+    let services = Services {
+        secrets: None,
+        garmin: None,
+        spawner: None,
+        notify: Arc::new(|| {}),
+        clock: fixed_clock(TestConfig::default().now),
+        sleep: RecordingSleep::new().sleep_fn(),
+    };
     Session::new(Store::open_in_memory().unwrap(), services)
 }
 
@@ -44,6 +54,7 @@ fn status_not_connected_by_default() {
                 file_store_needs_consent: false,
                 file_store_location: Some(TEST_FILE_STORE_LOCATION.to_owned()),
                 check_running: false,
+                sync: SyncStatusView::default(),
             }
         );
     }
@@ -148,8 +159,8 @@ fn disconnect_removes_key_and_row() {
         recorded.set(&SecretString::from("k-123")).unwrap();
         other.set(&SecretString::from("k-other")).unwrap();
 
-        let answer = session.execute("garmin.disconnect", Value::Null, Caller::User);
-        let Ok(Outcome::Done(raw)) = answer else { panic!("{backend:?}: {answer:?}") };
+        let finished = run_job(&mut session, "garmin.disconnect", Value::Null);
+        let Ok(raw) = finished.result else { panic!("{backend:?}: {:?}", finished.result) };
         assert!(!raw.to_string().contains("k-123"), "{raw}");
         assert_eq!(serde_json::from_value::<GarminStatusView>(raw).unwrap().status, ConnectionStatus::NotConnected);
         assert_eq!(stored_key(&recorded), None, "{backend:?}");
@@ -168,10 +179,15 @@ fn disconnect_keeps_the_connection_when_the_key_cannot_be_deleted() {
     handles.file.set(&SecretString::from("k-123")).unwrap();
     handles.file.set_failing(true);
 
-    assert!(matches!(session.execute("garmin.disconnect", Value::Null, Caller::User), Err(EngineError::Secrets(_))));
-    handles.file.set_failing(false);
+    let finished = run_job(&mut session, "garmin.disconnect", Value::Null);
+    assert!(matches!(finished.result, Err(EngineError::Secrets(_))), "{:?}", finished.result);
     assert_eq!(saved_connection(&session), Some(connection));
     assert_eq!(stored_key(&handles.file).as_deref(), Some("k-123"));
+    // Nothing holds the connection any more: the user can try again.
+    handles.file.set_failing(false);
+    assert_eq!((commands::find("garmin.disconnect").unwrap().enabled)(&session), Ok(()));
+    view_of(run_job(&mut session, "garmin.disconnect", Value::Null));
+    assert_eq!((saved_connection(&session), stored_key(&handles.file)), (None, None));
 }
 
 #[test]
@@ -239,7 +255,7 @@ fn run_job(session: &mut Session, id: &str, params: Value) -> JobFinished {
         Ok(Outcome::Started(job)) => job,
         other => panic!("{id}: expected a started job, got {other:?}"),
     };
-    let mut finished = session.poll_jobs();
+    let mut finished = poll_finished(session);
     assert_eq!(finished.len(), 1, "{id}: {finished:?}");
     let finished = finished.pop().unwrap();
     assert_eq!((finished.id, finished.command), (job, id));
@@ -360,7 +376,7 @@ fn reconnect_into_another_store_removes_the_key_from_the_old_one() {
     assert_eq!(stored_key(&handles.file), None, "the old key is gone from the old store");
 
     // And disconnecting now leaves no key anywhere.
-    session.execute("garmin.disconnect", Value::Null, Caller::User).unwrap();
+    view_of(run_job(&mut session, "garmin.disconnect", Value::Null));
     assert_eq!((stored_key(handles.system.as_ref().unwrap()), stored_key(&handles.file)), (None, None));
 }
 
@@ -472,7 +488,7 @@ fn connect_twice_is_disabled() {
     assert!(read_status(&mut session, Caller::Agent).check_running);
     assert_eq!(handles.garmin.calls(), 1);
 
-    let finished = session.poll_jobs();
+    let finished = poll_finished(&mut session);
     assert_eq!(finished.len(), 1);
     assert_eq!(finished[0].id, first);
     assert!(finished[0].result.is_ok());
@@ -499,9 +515,11 @@ fn check_in_flight_is_reported_until_applied() {
     spawner.run_pending();
     assert_eq!(handles.notifications.load(Ordering::SeqCst), 1);
     assert!(read_status(&mut session, Caller::User).check_running, "finished but not applied yet");
-    assert_eq!(stored_key(handles.system.as_ref().unwrap()), None, "nothing is written off the session's thread");
+    // The job has saved the key (a secret store may make the user wait); the record is written on the session's thread.
+    assert_eq!(stored_key(handles.system.as_ref().unwrap()).as_deref(), Some(KEY));
+    assert_eq!(saved_connection(&session), None, "the record waits for the session's thread");
 
-    let finished = session.poll_jobs();
+    let finished = poll_finished(&mut session);
     assert_eq!(finished.iter().map(|f| (f.id, f.command)).collect::<Vec<_>>(), [(job, "garmin.connect")]);
     assert!(!read_status(&mut session, Caller::User).check_running);
     assert_eq!(stored_key(handles.system.as_ref().unwrap()).as_deref(), Some(KEY));
@@ -567,6 +585,17 @@ fn connect_keeps_everything_when_the_key_cannot_be_saved() {
     assert_eq!(saved_connection(&session), Some(old));
 }
 
+/// Makes every write of the connection record to the database at `path` fail, as a full disk would.
+fn block_saving(path: &Path) {
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER no_insert BEFORE INSERT ON garmin_connection BEGIN SELECT RAISE(ABORT, 'test: saving fails'); END;
+             CREATE TRIGGER no_update BEFORE UPDATE ON garmin_connection BEGIN SELECT RAISE(ABORT, 'test: saving fails'); END;",
+        )
+        .unwrap();
+}
+
 #[test]
 fn connect_restores_the_old_key_when_the_connection_cannot_be_saved() {
     for old_key in [Some("k-old"), None] {
@@ -577,13 +606,7 @@ fn connect_restores_the_old_key_when_the_connection_cannot_be_saved() {
         if let Some(key) = old_key {
             system.set(&SecretString::from(key)).unwrap();
         }
-        rusqlite::Connection::open(&path)
-            .unwrap()
-            .execute_batch(
-                "CREATE TRIGGER no_insert BEFORE INSERT ON garmin_connection BEGIN SELECT RAISE(ABORT, 'test: saving fails'); END;
-                 CREATE TRIGGER no_update BEFORE UPDATE ON garmin_connection BEGIN SELECT RAISE(ABORT, 'test: saving fails'); END;",
-            )
-            .unwrap();
+        block_saving(&path);
 
         let finished = run_job(&mut session, "garmin.connect", connect_params("k-new"));
         assert!(matches!(finished.result, Err(EngineError::Store(_))), "{:?}", finished.result);
@@ -600,7 +623,7 @@ fn connect_result_has_no_key() {
     let (mut session, _) = test_session_with(TestConfig::default());
     let outcome = session.execute("garmin.connect", connect_params(KEY), Caller::User).unwrap();
     assert!(!format!("{outcome:?}").contains(KEY));
-    let finished = session.poll_jobs();
+    let finished = poll_finished(&mut session);
     let shown = format!("{finished:?}");
     assert!(!shown.contains(KEY), "{shown}");
     let value = finished[0].result.as_ref().unwrap();
@@ -844,8 +867,151 @@ fn job_panic_on_another_thread_is_error() {
     let Ok(Outcome::Started(job)) = session.execute("garmin.connect", connect_params(KEY), Caller::User) else { panic!("connect did not start") };
     let spawner = handles.spawner.clone().unwrap();
     std::thread::spawn(move || spawner.run_pending()).join().unwrap();
-    let finished = session.poll_jobs();
+    let finished = poll_finished(&mut session);
     assert_eq!(finished.len(), 1);
     assert_eq!(finished[0].id, job);
     assert!(matches!(finished[0].result, Err(EngineError::JobPanicked(_))), "{finished:?}");
+}
+
+// --- where the secret stores are touched: never on the session's thread (the window's, in the app) ---
+
+/// Runs what waits on `spawner` on another thread, as the app's runtime does, and returns that thread.
+fn run_elsewhere(spawner: &Arc<DeferredSpawner>) -> ThreadId {
+    let spawner = spawner.clone();
+    thread::spawn(move || {
+        spawner.run_pending();
+        thread::current().id()
+    })
+    .join()
+    .unwrap()
+}
+
+#[test]
+fn connect_writes_key_off_the_session_thread() {
+    let cfg = TestConfig { deferred: true, ..TestConfig::default() };
+    let (mut session, handles) = test_session_with(cfg.clone());
+    connected(&session, &handles, cfg.now, SecretBackend::System, "k-old");
+    let system = handles.system.clone().unwrap();
+    let spawner = handles.spawner.clone().unwrap();
+    system.take_ops();
+
+    let Ok(Outcome::Started(job)) = session.execute("garmin.connect", connect_params("k-new"), Caller::User) else { panic!("connect did not start") };
+    assert!(system.take_ops().is_empty(), "the command itself touches no secret store");
+    let worker = run_elsewhere(&spawner);
+    assert_ne!(worker, thread::current().id());
+    // The job read the key it replaces (to put it back if the record cannot be saved) and saved the new one.
+    assert_eq!(system.take_ops(), [(SecretOp::Get, worker), (SecretOp::Set, worker)]);
+    assert_eq!(stored_key(&system).as_deref(), Some("k-new"));
+
+    let finished = poll_finished(&mut session);
+    assert_eq!(finished.iter().map(|f| (f.id, f.result.is_ok())).collect::<Vec<_>>(), [(job, true)], "{finished:?}");
+    // Applying the result only wrote the record.
+    assert!(system.take_ops().is_empty(), "a secret store was touched on the session's thread");
+    assert!(handles.file.take_ops().is_empty(), "a secret store was touched on the session's thread");
+    assert_eq!(spawner.pending(), 0, "nothing is left to clean up: the old key was in the same store, and is replaced");
+    assert_eq!(saved_connection(&session).map(|connection| connection.connected_at), Some(cfg.now));
+}
+
+#[test]
+fn connect_db_failure_restores_key_in_background() {
+    for old_key in [Some("k-old"), None] {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("gymgar.sqlite3");
+        let (mut session, handles) = test_session_on(Store::open(&path).unwrap(), TestConfig { deferred: true, ..TestConfig::default() });
+        let system = handles.system.clone().unwrap();
+        let spawner = handles.spawner.clone().unwrap();
+        if let Some(key) = old_key {
+            system.set(&SecretString::from(key)).unwrap();
+        }
+        block_saving(&path);
+        let Ok(Outcome::Started(_)) = session.execute("garmin.connect", connect_params("k-new"), Caller::User) else { panic!("connect did not start") };
+        run_elsewhere(&spawner);
+        system.take_ops();
+
+        let finished = poll_finished(&mut session);
+        assert!(matches!(finished.as_slice(), [JobFinished { result: Err(EngineError::Store(_)), .. }]), "{old_key:?}: {finished:?}");
+        // The old key is put back by work of its own on the spawner, not on the session's thread.
+        assert!(system.take_ops().is_empty(), "{old_key:?}: a secret store was touched on the session's thread");
+        assert_eq!(stored_key(&system).as_deref(), Some("k-new"), "{old_key:?}: not put back yet");
+        assert_eq!(spawner.pending(), 1, "{old_key:?}");
+
+        let worker = run_elsewhere(&spawner);
+        let restore = if old_key.is_some() { SecretOp::Set } else { SecretOp::Delete };
+        assert_eq!(system.take_ops(), [(restore, worker)], "{old_key:?}");
+        assert_eq!(stored_key(&system).as_deref(), old_key);
+        assert_eq!(saved_connection(&session), None);
+    }
+}
+
+#[test]
+fn connect_removes_the_replaced_key_in_background() {
+    let cfg = TestConfig { deferred: true, ..TestConfig::default() };
+    let (mut session, handles) = test_session_with(cfg.clone());
+    connected(&session, &handles, cfg.now, SecretBackend::File, "k-old");
+    let spawner = handles.spawner.clone().unwrap();
+    let Ok(Outcome::Started(_)) = session.execute("garmin.connect", connect_params("k-new"), Caller::User) else { panic!("connect did not start") };
+    run_elsewhere(&spawner);
+    handles.file.take_ops();
+
+    let finished = poll_finished(&mut session);
+    let [JobFinished { result: Ok(_), .. }] = finished.as_slice() else { panic!("{finished:?}") };
+    assert_eq!(saved_connection(&session).map(|connection| connection.secret_backend), Some(SecretBackend::System));
+    assert!(handles.file.take_ops().is_empty(), "a secret store was touched on the session's thread");
+    assert_eq!(stored_key(&handles.file).as_deref(), Some("k-old"), "removed later, by work of its own");
+
+    let worker = run_elsewhere(&spawner);
+    assert_eq!(handles.file.take_ops(), [(SecretOp::Delete, worker)]);
+    assert_eq!(stored_key(&handles.file), None);
+    assert_eq!(stored_key(handles.system.as_ref().unwrap()).as_deref(), Some("k-new"));
+}
+
+#[test]
+fn disconnect_is_a_job() {
+    let cfg = TestConfig { deferred: true, ..TestConfig::default() };
+    let (mut session, handles) = test_session_with(cfg.clone());
+    let connection = connected(&session, &handles, cfg.now, SecretBackend::System, KEY);
+    let system = handles.system.clone().unwrap();
+    let spawner = handles.spawner.clone().unwrap();
+    system.take_ops();
+
+    let Ok(Outcome::Started(job)) = session.execute("garmin.disconnect", Value::Null, Caller::User) else { panic!("disconnect did not start") };
+    assert!(system.take_ops().is_empty(), "the command itself touches no secret store");
+    // While the key is being deleted, nothing may change the connection or use the key.
+    for id in ["garmin.connect", "garmin.verify", "garmin.disconnect", "garmin.sync"] {
+        assert_eq!((commands::find(id).unwrap().enabled)(&session), Err(DISCONNECT_RUNNING.to_owned()), "{id}");
+    }
+    assert_eq!(
+        session.execute("garmin.disconnect", Value::Null, Caller::User),
+        Err(EngineError::Disabled { cmd: "garmin.disconnect".to_owned(), reason: DISCONNECT_RUNNING.to_owned() })
+    );
+    assert!(!read_status(&mut session, Caller::User).check_running, "a disconnect is not a key check");
+
+    let worker = run_elsewhere(&spawner);
+    assert_eq!(system.take_ops(), [(SecretOp::Delete, worker)]);
+    assert_eq!(stored_key(&system), None);
+    assert_eq!(saved_connection(&session), Some(connection), "the record goes on the session's thread");
+
+    let finished = poll_finished(&mut session);
+    assert_eq!(finished.iter().map(|f| (f.id, f.command)).collect::<Vec<_>>(), [(job, "garmin.disconnect")]);
+    let view = view_of(finished.into_iter().next().unwrap());
+    assert_eq!((view.status, view.secret_backend), (ConnectionStatus::NotConnected, None));
+    assert!(system.take_ops().is_empty(), "a secret store was touched on the session's thread");
+    assert_eq!(saved_connection(&session), None);
+    assert_eq!((commands::find("garmin.connect").unwrap().enabled)(&session), Ok(()), "connecting again is possible at once");
+}
+
+#[test]
+fn a_dropped_disconnect_frees_the_connection_commands() {
+    let cfg = TestConfig { deferred: true, ..TestConfig::default() };
+    let (mut session, handles) = test_session_with(cfg.clone());
+    let connection = connected(&session, &handles, cfg.now, SecretBackend::System, KEY);
+    let spawner = handles.spawner.clone().unwrap();
+    let Ok(Outcome::Started(_)) = session.execute("garmin.disconnect", Value::Null, Caller::User) else { panic!("disconnect did not start") };
+
+    spawner.drop_pending();
+    let finished = poll_finished(&mut session);
+    assert!(matches!(finished.as_slice(), [JobFinished { result: Err(EngineError::JobDropped(_)), .. }]), "{finished:?}");
+    assert_eq!(saved_connection(&session), Some(connection));
+    assert_eq!(stored_key(handles.system.as_ref().unwrap()).as_deref(), Some(KEY));
+    assert_eq!((commands::find("garmin.disconnect").unwrap().enabled)(&session), Ok(()));
 }

@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{EngineError, Session, garmin_cmds, settings_cmds};
+use crate::{EngineError, Session, activity_cmds, exercise_cmds, garmin_cmds, settings_cmds, sync_cmds};
 
 /// Who runs a command. Agents (MCP) may run only commands marked `agent`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,6 +66,9 @@ static REGISTRY: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
     let mut v = Vec::new();
     v.extend(settings_cmds::specs());
     v.extend(garmin_cmds::specs());
+    v.extend(sync_cmds::specs());
+    v.extend(activity_cmds::specs());
+    v.extend(exercise_cmds::specs());
     v
 });
 
@@ -104,11 +107,22 @@ mod tests {
     use std::collections::HashSet;
 
     /// The command table of the design spec (§7 "Commands"): id, kind, agent, destructive.
-    const SPEC_TABLE: [(&str, CommandKind, bool, bool); 6] = [
+    const SPEC_TABLE: [(&str, CommandKind, bool, bool); 17] = [
         ("garmin.status", CommandKind::Query, true, false),
         ("garmin.connect", CommandKind::Job, false, false),
         ("garmin.verify", CommandKind::Job, false, false),
-        ("garmin.disconnect", CommandKind::Mutation, false, true),
+        ("garmin.disconnect", CommandKind::Job, false, true),
+        ("garmin.sync", CommandKind::Job, false, false),
+        ("activity.reparse", CommandKind::Job, false, false),
+        ("activity.list", CommandKind::Query, true, false),
+        ("activity.get", CommandKind::Query, true, false),
+        ("activity.markSeen", CommandKind::Mutation, false, false),
+        ("activity.setExcluded", CommandKind::Mutation, true, false),
+        ("activity.editSets", CommandKind::Mutation, true, false),
+        ("activity.resetSets", CommandKind::Mutation, true, false),
+        ("activity.addSet", CommandKind::Mutation, true, false),
+        ("activity.removeAddedSet", CommandKind::Mutation, true, false),
+        ("exercise.search", CommandKind::Query, true, false),
         ("settings.get", CommandKind::Query, true, false),
         ("settings.setLanguage", CommandKind::Mutation, true, false),
     ];
@@ -126,8 +140,9 @@ mod tests {
             let schema = (spec.params_schema)();
             assert_eq!(schema.get("type"), Some(&json!("object")), "{}: {schema:?}", spec.id);
         }
-        // Agents may never enter, check or remove the key; only disconnect destroys anything.
-        for id in ["garmin.connect", "garmin.verify", "garmin.disconnect"] {
+        // Agents may never enter, check or remove the key, nor make the app go to Garmin, nor take the "new" mark off (it is for
+        // the user's eyes); only disconnect destroys anything.
+        for id in ["garmin.connect", "garmin.verify", "garmin.disconnect", "garmin.sync", "activity.reparse", "activity.markSeen"] {
             assert!(find(id).is_none_or(|spec| !spec.agent), "{id}");
         }
         assert_eq!(all().iter().filter(|spec| spec.destructive).map(|spec| spec.id).collect::<Vec<_>>(), ["garmin.disconnect"]);

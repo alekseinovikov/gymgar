@@ -13,7 +13,9 @@ fn the_embedded_icons_are_svgs_that_a_tint_can_colour() {
         assert!(!svg.contains("currentColor"), "{icon:?}");
         assert!(svg.contains("stroke=\"white\""), "{icon:?}");
     }
-    assert_ne!(Icon::House.svg(), Icon::Settings.svg());
+    let distinct: std::collections::HashSet<_> = Icon::ALL.iter().map(|icon| icon.svg()).collect();
+    assert_eq!(distinct.len(), Icon::ALL.len(), "each icon is its own picture");
+    assert!(Icon::ALL.contains(&Icon::Dumbbell));
 }
 
 #[test]

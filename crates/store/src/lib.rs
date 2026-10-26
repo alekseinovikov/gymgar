@@ -3,17 +3,25 @@
 //! L1: may depend on `gymgar-domain` only. Every schema change ships with a migration and a test
 //! that opens a database written by the previous version. One mutating command = one transaction.
 
+mod activities;
+mod activity_queries;
+mod corrections;
 mod error;
 mod garmin_connection;
 mod migrations;
 pub mod paths;
 mod settings;
+#[cfg(test)]
+mod test_support;
 
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
+pub use activities::{FileOutcome, NewActivity, SyncSnapshot, SyncState};
+pub use activity_queries::{ActivityDetail, ActivityFilter, ActivityRow};
+pub use corrections::SetChange;
 pub use error::StoreError;
 
 /// How long a statement waits for another connection's write lock before failing with [`StoreError::Busy`].
@@ -66,6 +74,13 @@ impl Store {
         Ok(Store { conn })
     }
 
+    /// Starts a transaction that takes the write lock at once. A deferred one that reads first and writes later can
+    /// fail with `Busy` at the upgrade without waiting for `busy_timeout`; this one waits its turn up front.
+    /// Dropping it without `commit` rolls everything back.
+    pub(crate) fn write_tx(&self) -> Result<Transaction<'_>, StoreError> {
+        Ok(Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?)
+    }
+
     /// SQLite's `data_version`: changes when *another* connection commits to the database file, never for our own writes.
     /// The UI polls it to notice that another process (the CLI, an agent) changed the data.
     pub fn data_version(&self) -> Result<i64, StoreError> {
@@ -76,7 +91,8 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gymgar_domain::Language;
+    use chrono::{TimeZone, Utc};
+    use gymgar_domain::{ConnectionStatus, GarminConnection, KeyTerm, Language, SecretBackend};
     use tempfile::TempDir;
 
     fn db_in(dir: &TempDir) -> std::path::PathBuf {
@@ -98,12 +114,46 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = db_in(&dir);
         let store = Store::open(&path).unwrap();
-        assert_eq!(user_version(&store), 1);
+        assert_eq!(user_version(&store), 2);
         let journal_mode: String = store.conn.pragma_query_value(None, "journal_mode", |row| row.get(0)).unwrap();
         assert_eq!(journal_mode, "wal");
         drop(store);
         let reopened = Store::open(&path).unwrap();
-        assert_eq!(user_version(&reopened), 1);
+        assert_eq!(user_version(&reopened), 2);
+    }
+
+    #[test]
+    fn migrates_v1_database_with_connection() {
+        let dir = TempDir::new().unwrap();
+        let path = db_in(&dir);
+        {
+            // A database exactly as the first release left it: schema 1 with a chosen language and a saved connection.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(migrations::MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute("INSERT INTO app_settings (key, value) VALUES ('language', 'ru')", []).unwrap();
+            conn.execute(
+                "INSERT INTO garmin_connection (id, connected_at, key_term_days, key_expires_at, last_verified_at, last_status, secret_backend)
+                 VALUES (1, '2026-10-23T12:30:15Z', 90, '2027-01-21T12:30:15Z', '2026-10-23T13:30:15Z', 'connected', 'file')",
+                [],
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(user_version(&store), 2);
+        assert_eq!(store.language().unwrap(), Language::Ru);
+        let expected = GarminConnection {
+            connected_at: Utc.with_ymd_and_hms(2026, 10, 23, 12, 30, 15).unwrap(),
+            key_term: KeyTerm::Days90,
+            key_expires_at: Utc.with_ymd_and_hms(2027, 1, 21, 12, 30, 15).unwrap(),
+            last_verified_at: Some(Utc.with_ymd_and_hms(2026, 10, 23, 13, 30, 15).unwrap()),
+            last_status: ConnectionStatus::Connected,
+            secret_backend: SecretBackend::File,
+        };
+        assert_eq!(store.garmin_connection().unwrap(), Some(expected));
+        // The new tables are there, empty and usable.
+        assert_eq!(store.sync_snapshot().unwrap().known.len(), 0);
+        assert_eq!(store.sync_state().unwrap(), SyncState::default());
     }
 
     #[test]
@@ -117,7 +167,7 @@ mod tests {
     #[test]
     fn open_in_memory_has_the_schema() {
         let store = Store::open_in_memory().unwrap();
-        assert_eq!(user_version(&store), 1);
+        assert_eq!(user_version(&store), 2);
         assert_eq!(store.language().unwrap(), Language::System);
     }
 

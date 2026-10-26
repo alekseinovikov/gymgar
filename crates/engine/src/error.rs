@@ -38,6 +38,10 @@ pub enum EngineError {
     /// A background job panicked; the panic was caught and turned into this error.
     #[error("background job panicked: {0}")]
     JobPanicked(String),
+    /// The spawner dropped a background job before it finished (the runtime shut down, say): whatever the job had not
+    /// sent yet is lost. Holds the id of the command that started the job.
+    #[error("background job was dropped before it finished: {0}")]
+    JobDropped(String),
     /// A command, or the step that applies a finished job's result, panicked on the session's thread; the panic was
     /// caught and turned into this error. Holds the command id only: the params, or the job's output, may hold a key.
     #[error("command {0} panicked")]
@@ -47,6 +51,17 @@ pub enum EngineError {
 impl From<StoreError> for EngineError {
     fn from(error: StoreError) -> EngineError {
         EngineError::Store(error.to_string())
+    }
+}
+
+impl EngineError {
+    /// A store error of command `cmd`. A record the params named that does not exist (an unknown activity or set) is a
+    /// mistake of the params, so it is [`EngineError::BadParams`]; every other failure is the database's.
+    pub(crate) fn from_store(cmd: &str, error: StoreError) -> EngineError {
+        match error {
+            StoreError::NotFound(what) => EngineError::BadParams { cmd: cmd.to_owned(), msg: format!("not found: {what}") },
+            other => other.into(),
+        }
     }
 }
 
