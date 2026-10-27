@@ -2,17 +2,23 @@
 //!
 //! - `ci`: fmt check, clippy with `-D warnings`, tests, layering. The gate before finishing a task.
 //! - `layers`: check the crate dependency layering (`layers.rs`).
+//! - `scrub-fit <in.zip> <out.zip>`, `scrub-list <in.json> <out.json> --take <n>`: make a committable fixture from a real Garmin
+//!   download (`scrub.rs`).
 
 mod layers;
+mod scrub;
 
 use std::process::{Command, ExitCode};
 
 fn main() -> ExitCode {
-    let result = match std::env::args().nth(1).as_deref() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let result = match args.first().map(String::as_str) {
         Some("ci") => ci(),
         Some("layers") => check_layers(),
+        Some("scrub-fit") => scrub::run_fit(args.get(1..).unwrap_or_default()),
+        Some("scrub-list") => scrub::run_list(args.get(1..).unwrap_or_default()),
         _ => {
-            eprintln!("usage: cargo xtask <ci|layers>");
+            eprintln!("usage: cargo xtask <ci|layers|scrub-fit|scrub-list>");
             return ExitCode::from(2);
         }
     };

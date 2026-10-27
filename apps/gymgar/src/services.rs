@@ -1,5 +1,5 @@
 //! The platform side of the engine's services: adapters from the engine's traits to the system keychain, the secret file,
-//! the Garmin client and the tokio runtime, and [`build`], which puts them together for the desktop app.
+//! the Garmin Personal API client and the tokio runtime, and [`build`], which puts them together for the desktop app.
 //!
 //! The engine knows none of these crates, and the adapters know no policy: which store a key goes to, and whether the
 //! user has to agree first, is the engine's rule ([`SecretStores::new_key_backend`]); this module only decides which
@@ -8,12 +8,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Utc;
-use gymgar_domain::SecretBackend;
-use gymgar_engine::{BoxFuture, GarminAuth, GarminAuthError, SecretStore, SecretStoreError, SecretStores, Services, Spawner};
+use gymgar_domain::{ActivityId, SecretBackend};
+use gymgar_engine::{BoxFuture, GarminAuth, GarminAuthError, GarminSession, SecretStore, SecretStoreError, SecretStores, Services, Spawner};
 use gymgar_garmin::GarminError;
-use gymgar_garmin::personal::Auth;
+use gymgar_garmin::personal::{Auth, Client, DEFAULT_BASE_URL};
 use gymgar_secrets::{FileStore, GARMIN_ACCOUNT, SERVICE, SecretsError, SystemStore};
 use secrecy::SecretString;
 
@@ -91,7 +92,7 @@ impl SecretStore for FileSecretStore {
 /// Which secret stores this run has. A debug build has no system store at all and prefers the file: it never touches or
 /// even probes the OS keychain, so developing does not make macOS ask for access after every rebuild, and never reaches
 /// the key of an installed release. A release build asks `probe_system_store` once; the system store exists only if that
-/// says it works here.
+/// says it works here. (The app probes before its window exists, off the main thread, and hands the answer in.)
 fn secret_stores(data_dir: &Path, debug_build: bool, probe_system_store: impl FnOnce() -> bool) -> SecretStores {
     let file: Arc<dyn SecretStore> = Arc::new(FileSecretStore::new(data_dir.join(SECRETS_DIR).join(GARMIN_ACCOUNT)));
     if debug_build {
@@ -101,7 +102,7 @@ fn secret_stores(data_dir: &Path, debug_build: bool, probe_system_store: impl Fn
     SecretStores { system, file, prefer_file: false }
 }
 
-/// What the user is told about a key Garmin did not accept, from what the client found out.
+/// What the engine is told about a Garmin request that failed, from what the client found out.
 fn auth_error(error: &GarminError) -> GarminAuthError {
     match error {
         // A key with a character no real key has is as wrong as one Garmin turned down, and nothing was sent.
@@ -109,18 +110,75 @@ fn auth_error(error: &GarminError) -> GarminAuthError {
         GarminError::RateLimited => GarminAuthError::RateLimited,
         GarminError::Unavailable { .. } => GarminAuthError::Unavailable,
         GarminError::Network(_) => GarminAuthError::Network,
+        GarminError::NotFound => GarminAuthError::NotFound,
         GarminError::UnexpectedResponse(_) => GarminAuthError::Unexpected,
     }
 }
 
-/// Checks keys with Garmin's Personal API: one exchange of the key for a token.
-pub struct GarminPersonalAuth;
+/// Garmin's Personal API: checks keys with one exchange of the key for a token, and opens sessions for the sync.
+pub struct GarminPersonalAuth {
+    base_url: String,
+}
+
+impl GarminPersonalAuth {
+    /// The real Personal API.
+    pub fn new() -> GarminPersonalAuth {
+        GarminPersonalAuth { base_url: DEFAULT_BASE_URL.to_owned() }
+    }
+
+    /// Another server, such as a local mock.
+    #[cfg(test)]
+    fn with_base_url(base_url: &str) -> GarminPersonalAuth {
+        GarminPersonalAuth { base_url: base_url.to_owned() }
+    }
+}
+
+impl Default for GarminPersonalAuth {
+    fn default() -> GarminPersonalAuth {
+        GarminPersonalAuth::new()
+    }
+}
 
 impl GarminAuth for GarminPersonalAuth {
     fn check_key(&self, key: SecretString) -> BoxFuture<Result<(), GarminAuthError>> {
+        let base_url = self.base_url.clone();
         // The client is built inside the future, so building it (TLS setup) is part of the background job too.
-        Box::pin(async move { check(Auth::new(key)).await })
+        Box::pin(async move { check(Auth::with_base_url(key, &base_url)).await })
     }
+
+    /// The engine calls this inside the sync's job, so building the client (TLS setup) is off the UI thread too.
+    fn open(&self, key: SecretString) -> Result<Arc<dyn GarminSession>, GarminAuthError> {
+        let client = Client::with_base_url(key, &self.base_url).map_err(|error| failed("opening a Garmin session", &error))?;
+        Ok(Arc::new(GarminPersonalSession(Arc::new(client))))
+    }
+}
+
+/// The sync's requests for one key: one [`Client`], whose `Auth` keeps the token between requests and exchanges the key
+/// again on a 401 (the engine keeps the session for the run, so the token outlives one sync).
+pub struct GarminPersonalSession(Arc<Client>);
+
+impl GarminSession for GarminPersonalSession {
+    fn verify(&self) -> BoxFuture<Result<(), GarminAuthError>> {
+        let client = self.0.clone();
+        Box::pin(async move { client.exchange().await.map(|_| ()).map_err(|error| failed("the Garmin key check", &error)) })
+    }
+
+    fn activities_page(&self, start: u32, limit: u32) -> BoxFuture<Result<Vec<u8>, GarminAuthError>> {
+        let client = self.0.clone();
+        Box::pin(async move { client.activities_page(start, limit).await.map_err(|error| failed("a page of the Garmin activity list", &error)) })
+    }
+
+    fn activity_file(&self, id: ActivityId) -> BoxFuture<Result<Vec<u8>, GarminAuthError>> {
+        let client = self.0.clone();
+        Box::pin(async move { client.activity_file(id.0).await.map_err(|error| failed("a Garmin activity file", &error)) })
+    }
+}
+
+/// Logs why `what` failed and turns it into the engine's error. The engine's error says only what kind of failure it
+/// was; nothing in a `GarminError` is the key or a token.
+fn failed(what: &str, error: &GarminError) -> GarminAuthError {
+    log::info!("{what} failed: {error}");
+    auth_error(error)
 }
 
 /// Asks Garmin about the key `auth` was made from.
@@ -147,14 +205,26 @@ impl Spawner for TokioSpawner {
     fn spawn(&self, fut: BoxFuture<()>) {
         let handle = self.0.clone();
         // The job's result travels through the engine's channel, so the join handle has nothing left to report. A panic
-        // never gets here: the engine catches it around the job.
+        // never gets here: the engine catches it around the job. A job the runtime drops at shutdown before it ran
+        // reports that itself (`EngineError::JobDropped`).
         self.0.spawn_blocking(move || handle.block_on(fut));
     }
 }
 
-/// The services of the desktop app. `notify` wakes the window when a job has finished.
-pub fn build(data_dir: &Path, ctx: egui::Context, rt: &tokio::runtime::Runtime) -> Services {
-    let secrets = secret_stores(data_dir, cfg!(debug_assertions), SystemStore::is_available);
+/// Waits on the timer of the runtime `handle` belongs to: the sleep of the engine's jobs.
+fn tokio_sleep(handle: tokio::runtime::Handle) -> Arc<dyn Fn(Duration) -> BoxFuture<()> + Send + Sync> {
+    Arc::new(move |duration| {
+        // The timer is found through the runtime the caller is in, and there is none outside it: tokio would panic.
+        // Entering the runtime here makes the sleep work wherever it is made, not only inside a job.
+        let _runtime = handle.enter();
+        Box::pin(tokio::time::sleep(duration))
+    })
+}
+
+/// The services of the desktop app. `system_store_works` is what the probe of the system secret store found out (a debug
+/// build ignores it). `notify` wakes the window when a job has sent something or finished.
+pub fn build(data_dir: &Path, system_store_works: bool, ctx: egui::Context, rt: &tokio::runtime::Runtime) -> Services {
+    let secrets = secret_stores(data_dir, cfg!(debug_assertions), || system_store_works);
     log::info!(
         "secret stores: system store {}, new keys go to {}",
         if secrets.system.is_some() { "available" } else { "not used" },
@@ -162,10 +232,11 @@ pub fn build(data_dir: &Path, ctx: egui::Context, rt: &tokio::runtime::Runtime) 
     );
     Services {
         secrets: Some(secrets),
-        garmin: Some(Arc::new(GarminPersonalAuth)),
+        garmin: Some(Arc::new(GarminPersonalAuth::new())),
         spawner: Some(Arc::new(TokioSpawner(rt.handle().clone()))),
         notify: Arc::new(move || ctx.request_repaint()),
         clock: Arc::new(Utc::now),
+        sleep: tokio_sleep(rt.handle().clone()),
     }
 }
 
@@ -180,19 +251,21 @@ mod tests {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use chrono::Utc;
     use gymgar_domain::{ConnectionStatus, SecretBackend};
-    use gymgar_engine::{Caller, EngineError, GarminStatusView, JobFinished, JobId, Outcome, Session};
+    use gymgar_engine::{Caller, EngineError, GarminStatusView, JobEvent, JobId, Outcome, Session};
     use gymgar_store::Store;
     use secrecy::{ExposeSecret, SecretString};
     use serde_json::{Value, json};
     use tempfile::TempDir;
     use tokio::sync::Notify;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
     use crate::logging::testing::capture;
 
     const TOKEN_PATH: &str = "/personalapitoken-service/personal-api/personal-api-key/token";
+    const LIST_PATH: &str = "/activitylist-service/activities/search/activities";
+    const FILE_PATH: &str = "/download-service/files/activity";
     const KEY: &str = "not-a-real-key";
 
     fn secret(text: &str) -> SecretString {
@@ -212,6 +285,7 @@ mod tests {
             (GarminError::Unavailable { status: 503 }, GarminAuthError::Unavailable),
             (GarminError::Network("connection refused".to_owned()), GarminAuthError::Network),
             (GarminError::UnexpectedResponse("HTTP 418".to_owned()), GarminAuthError::Unexpected),
+            (GarminError::NotFound, GarminAuthError::NotFound),
         ];
         for (error, expected) in cases {
             assert_eq!(auth_error(&error), expected, "{error:?}");
@@ -395,6 +469,69 @@ mod tests {
     }
 
     #[test]
+    fn a_session_fetches_pages_and_files_from_the_personal_api() {
+        let rt = runtime(1);
+        rt.block_on(async {
+            let server = MockServer::start().await;
+            // One exchange: the check; the requests after it reuse the token.
+            Mock::given(method("POST"))
+                .and(path(TOKEN_PATH))
+                .respond_with(ResponseTemplate::new(200).set_body_string(fake_token()))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let list = br#"[{"activityId": 42, "activityType": {"typeKey": "strength_training"}}]"#.to_vec();
+            Mock::given(method("GET"))
+                .and(path(LIST_PATH))
+                .and(query_param("start", "0"))
+                .and(query_param("limit", "100"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(list.clone()))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let zip = vec![0x50, 0x4B, 0x03, 0x04, 0xFF, 0x00];
+            Mock::given(method("GET"))
+                .and(path(format!("{FILE_PATH}/42")))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(zip.clone()))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("GET")).and(path(format!("{FILE_PATH}/43"))).respond_with(ResponseTemplate::new(404)).expect(1).mount(&server).await;
+
+            let session = GarminPersonalAuth::with_base_url(&server.uri()).open(secret(KEY)).expect("a session for the key");
+            assert_eq!(session.verify().await, Ok(()));
+            assert_eq!(session.activities_page(0, 100).await, Ok(list));
+            assert_eq!(session.activity_file(ActivityId(42)).await, Ok(zip));
+            assert_eq!(session.activity_file(ActivityId(43)).await, Err(GarminAuthError::NotFound), "a manual activity has no file");
+            server.verify().await;
+        });
+    }
+
+    #[test]
+    fn a_session_reports_what_garmin_answered() {
+        let rt = runtime(1);
+        rt.block_on(async {
+            let server = MockServer::start().await;
+            Mock::given(method("POST")).and(path(TOKEN_PATH)).respond_with(ResponseTemplate::new(200).set_body_string(fake_token())).mount(&server).await;
+            Mock::given(method("GET")).and(path(LIST_PATH)).respond_with(ResponseTemplate::new(429)).mount(&server).await;
+            Mock::given(method("GET")).and(path(format!("{FILE_PATH}/42"))).respond_with(ResponseTemplate::new(503)).mount(&server).await;
+            Mock::given(method("GET")).and(path(format!("{FILE_PATH}/43"))).respond_with(ResponseTemplate::new(401)).mount(&server).await;
+
+            let session = GarminPersonalAuth::with_base_url(&server.uri()).open(secret(KEY)).expect("a session for the key");
+            assert_eq!(session.activities_page(0, 100).await, Err(GarminAuthError::RateLimited));
+            assert_eq!(session.activity_file(ActivityId(42)).await, Err(GarminAuthError::Unavailable));
+            assert_eq!(session.activity_file(ActivityId(43)).await, Err(GarminAuthError::KeyRejected));
+        });
+    }
+
+    #[test]
+    fn a_key_garmin_could_never_accept_opens_no_session() {
+        // Nothing listens there: opening must not send anything.
+        let opened = GarminPersonalAuth::with_base_url("http://127.0.0.1:9").open(secret("ключ с пробелами"));
+        assert_eq!(opened.err(), Some(GarminAuthError::KeyRejected));
+    }
+
+    #[test]
     fn a_job_that_blocks_its_thread_does_not_stop_the_others() {
         // One worker, as bad as it gets: a job that waits for the keychain (a blocking call) must not keep this worker from
         // running the next job. The first job waits for the second one's signal; if the second never gets to run, it
@@ -436,12 +573,17 @@ mod tests {
                 result
             })
         }
+
+        fn open(&self, _key: SecretString) -> Result<Arc<dyn GarminSession>, GarminAuthError> {
+            // These tests connect; nothing syncs.
+            Err(GarminAuthError::Unexpected)
+        }
     }
 
     /// What a `garmin.connect` left behind after it went through the real runtime, spawner and session.
     struct Connected {
         job: JobId,
-        finished: Vec<JobFinished>,
+        finished: Vec<JobEvent>,
         status: GarminStatusView,
         asked_with: Option<String>,
         key_file: PathBuf,
@@ -471,6 +613,7 @@ mod tests {
                 let _ = notified_tx.send(());
             }),
             clock: Arc::new(Utc::now),
+            sleep: tokio_sleep(rt.handle().clone()),
         };
         let mut session = Session::new(Store::open(&dir.path().join("gymgar.sqlite3")).unwrap(), services);
 
@@ -518,7 +661,7 @@ mod tests {
     #[test]
     fn a_key_garmin_accepts_is_connected_through_the_runtime() {
         let run = connect_through_the_runtime(Ok(()));
-        let [finished] = run.finished.as_slice() else { panic!("expected one finished job, got {:?}", run.finished) };
+        let [JobEvent::Finished(finished)] = run.finished.as_slice() else { panic!("expected one finished job, got {:?}", run.finished) };
         assert_eq!((finished.id, finished.command), (run.job, "garmin.connect"));
         let Ok(answer) = &finished.result else { panic!("the connect failed: {:?}", finished.result) };
         assert_eq!(answer.get("status"), Some(&json!("connected")), "{answer}");
@@ -535,7 +678,7 @@ mod tests {
     #[test]
     fn a_key_garmin_rejects_saves_nothing_through_the_runtime() {
         let run = connect_through_the_runtime(Err(GarminAuthError::KeyRejected));
-        let [finished] = run.finished.as_slice() else { panic!("expected one finished job, got {:?}", run.finished) };
+        let [JobEvent::Finished(finished)] = run.finished.as_slice() else { panic!("expected one finished job, got {:?}", run.finished) };
         assert_eq!((finished.id, finished.command), (run.job, "garmin.connect"));
         assert_eq!(finished.result, Err(EngineError::Garmin(GarminAuthError::KeyRejected)));
 
@@ -560,6 +703,28 @@ mod tests {
         assert!(elapsed >= Duration::from_millis(50), "{elapsed:?}");
     }
 
+    #[test]
+    fn the_sleep_of_the_jobs_waits_on_the_runtime_timer() {
+        let rt = runtime(1);
+        let sleep = tokio_sleep(rt.handle().clone());
+        // Made on this thread, outside the runtime, where a bare `tokio::time::sleep` would panic.
+        let started = Instant::now();
+        let wait = sleep(Duration::from_millis(50));
+        rt.block_on(wait);
+        assert!(started.elapsed() >= Duration::from_millis(50), "{:?}", started.elapsed());
+
+        // Made and awaited inside a job, as the engine's jobs do.
+        let spawner = TokioSpawner(rt.handle().clone());
+        let (done, finished) = mpsc::channel();
+        let started = Instant::now();
+        spawner.spawn(Box::pin(async move {
+            sleep(Duration::from_millis(50)).await;
+            let _ = done.send(started.elapsed());
+        }));
+        let elapsed = finished.recv_timeout(Duration::from_secs(5)).expect("the job finished");
+        assert!(elapsed >= Duration::from_millis(50), "{elapsed:?}");
+    }
+
     #[cfg(debug_assertions)]
     #[test]
     fn build_wires_every_service_without_touching_the_keychain() {
@@ -572,7 +737,8 @@ mod tests {
             counted.fetch_add(1, Ordering::SeqCst);
         });
 
-        let services = build(dir.path(), ctx, &rt);
+        // Even when told the system store works, a debug build does not use it.
+        let services = build(dir.path(), true, ctx, &rt);
         let secrets = services.secrets.as_ref().expect("secret stores");
         assert!(secrets.system.is_none() && secrets.prefer_file, "a debug build uses files only");
         assert!(services.garmin.is_some());
@@ -583,6 +749,9 @@ mod tests {
         let before = repaints.load(Ordering::SeqCst);
         (services.notify)();
         assert!(repaints.load(Ordering::SeqCst) > before, "notify wakes the window");
+        let started = Instant::now();
+        rt.block_on((services.sleep)(Duration::from_millis(20)));
+        assert!(started.elapsed() >= Duration::from_millis(20), "the sleep waits for real: {:?}", started.elapsed());
 
         // A job started through the services runs on the runtime.
         let (done, finished) = mpsc::channel();

@@ -150,12 +150,14 @@ fn actions(app: &mut GymgarApp, ui: &mut Ui, status: &GarminStatusView) {
     }
     // The engine says whether the key can be removed right now; the card says why not, in the user's language.
     let can_disconnect = app.is_enabled("garmin.disconnect");
+    // While the key is being deleted, it is not replaced either.
+    let disconnecting = app.ui.connect.disconnecting.is_some();
     let (mut replace, mut ask) = (false, false);
     ui.horizontal(|ui| {
-        replace = widgets::secondary_button(ui, tl!("Replace key")).clicked();
-        ask = disconnect_button(ui, can_disconnect);
+        replace = ui.add_enabled_ui(!disconnecting, |ui| widgets::secondary_button(ui, tl!("Replace key"))).inner.clicked();
+        ask = disconnect_button(ui, can_disconnect, disconnecting);
     });
-    if !can_disconnect {
+    if !can_disconnect && !disconnecting {
         why_disconnect_is_unavailable(ui, status);
     }
     if replace {
@@ -174,25 +176,37 @@ fn broken_key_actions(app: &mut GymgarApp, ui: &mut Ui, status: &GarminStatusVie
         return;
     }
     let can_disconnect = app.is_enabled("garmin.disconnect");
-    if disconnect_button(ui, can_disconnect) {
+    let disconnecting = app.ui.connect.disconnecting.is_some();
+    if disconnect_button(ui, can_disconnect, disconnecting) {
         ask_to_disconnect(app);
     }
-    if !can_disconnect {
+    if !can_disconnect && !disconnecting {
         why_disconnect_is_unavailable(ui, status);
     }
 }
 
-/// The "Disconnect" button, greyed out unless `enabled`; whether it was clicked.
-fn disconnect_button(ui: &mut Ui, enabled: bool) -> bool {
-    ui.add_enabled_ui(enabled, |ui| widgets::secondary_button(ui, tl!("Disconnect"))).inner.clicked()
+/// The "Disconnect" button, greyed out unless `enabled`, with the indicator beside it while the disconnect the user
+/// confirmed is `running`; whether it was clicked.
+fn disconnect_button(ui: &mut Ui, enabled: bool, running: bool) -> bool {
+    ui.horizontal(|ui| {
+        let clicked = ui.add_enabled_ui(enabled, |ui| widgets::secondary_button(ui, tl!("Disconnect"))).inner.clicked();
+        if running {
+            ui.add(egui::Spinner::new().size(metrics::SPINNER_SIZE));
+        }
+        clicked
+    })
+    .inner
 }
 
-/// Why "Disconnect" is greyed out: a key check holds the connection, or the key's store cannot be reached.
+/// Why "Disconnect" is greyed out when no disconnect is running: a key check or a sync holds the connection, or the
+/// key's store cannot be reached.
 fn why_disconnect_is_unavailable(ui: &mut Ui, status: &GarminStatusView) {
     widgets::hint(
         ui,
         if status.check_running {
             tl!("A key check is running. Try again in a moment.")
+        } else if status.sync.running {
+            tl!("Workouts are loading from Garmin. Try again when it ends.")
         } else {
             tl!("Gymgar cannot reach the password store that holds the key, so it cannot disconnect now.")
         },
@@ -260,8 +274,10 @@ fn connect_form(app: &mut GymgarApp, ui: &mut Ui, t: &Tokens, status: &GarminSta
         }
     });
 
-    // The engine refuses a key that is empty once trimmed, so the button waits for one.
-    let can_connect = !busy && !app.ui.connect.key.trim().is_empty();
+    // The engine refuses a key that is empty once trimmed, so the button waits for one. While the old key is being
+    // deleted, a new one waits too (the indicator is by "Disconnect", the button that runs), and so it does while a sync
+    // uses the key (the indicator is on the Activities screen).
+    let can_connect = !busy && !status.sync.running && app.ui.connect.disconnecting.is_none() && !app.ui.connect.key.trim().is_empty();
     let (mut connect, mut cancel) = (enter_pressed && can_connect, false);
     ui.horizontal(|ui| {
         connect |= ui.add_enabled_ui(can_connect, |ui| widgets::primary_button(ui, tl!("Connect"))).inner.clicked();
@@ -322,13 +338,17 @@ fn start_connect(app: &mut GymgarApp) {
     }
 }
 
-/// The user confirmed: the key and the connection are removed.
+/// The user confirmed: the key and the connection are removed, in the background. The card waits for that as long as
+/// `disconnecting` is set, and [`GymgarApp::tick`] ends the wait.
 fn disconnect(app: &mut GymgarApp) {
-    app.ui.connect.confirm_disconnect = false;
+    let form = &mut app.ui.connect;
+    form.confirm_disconnect = false;
+    form.error = None;
     match app.run("garmin.disconnect", Value::Null) {
-        Ok(_) => {
+        Ok(Outcome::Started(job)) => app.ui.connect.disconnecting = Some(job),
+        Ok(Outcome::Done(_)) => {
+            log::warn!("garmin.disconnect finished at once, though it is a background job");
             app.ui.connect.replacing = false;
-            app.ui.connect.error = None;
         }
         Err(text) => app.ui.connect.error = Some(text),
     }

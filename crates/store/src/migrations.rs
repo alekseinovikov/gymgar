@@ -23,6 +23,92 @@ pub(crate) const MIGRATIONS: &[&str] = &[
          last_status      TEXT NOT NULL,
          secret_backend   TEXT NOT NULL
      );",
+    // 2: imported Garmin activities, their strength files, the user's corrections and the sync bookkeeping.
+    // Times are RFC 3339 strings in UTC (fixed width, so that they sort as text), weights are whole grams.
+    // `recorded_set` is derived from the stored file and rebuilt on every re-parse; `set_correction` and `added_set`
+    // are the user's and are never rebuilt. An exercise is a category plus an optional name: NULL category is "no exercise".
+    "CREATE TABLE activity (
+         id             INTEGER PRIMARY KEY,
+         type_key       TEXT NOT NULL,
+         name           TEXT,
+         start_at       TEXT NOT NULL,
+         duration_ms    INTEGER,
+         distance_m     REAL,
+         avg_hr         INTEGER,
+         calories       INTEGER,
+         manual         INTEGER NOT NULL CHECK (manual IN (0, 1)),
+         raw_json       TEXT NOT NULL,
+         first_seen_at  TEXT NOT NULL,
+         seen_at        TEXT,
+         excluded       INTEGER NOT NULL DEFAULT 0 CHECK (excluded IN (0, 1)),
+         file_state     TEXT NOT NULL,
+         parser_version INTEGER,
+         workout_name   TEXT,
+         counted_sets   INTEGER NOT NULL DEFAULT 0,
+         exercise_count INTEGER NOT NULL DEFAULT 0
+     );
+     CREATE INDEX activity_start_at ON activity (start_at);
+     CREATE TABLE activity_file (
+         activity_id INTEGER PRIMARY KEY REFERENCES activity (id),
+         zip         BLOB NOT NULL
+     );
+     CREATE TABLE recorded_set (
+         activity_id       INTEGER NOT NULL REFERENCES activity (id),
+         message_index     INTEGER NOT NULL,
+         start_at          TEXT NOT NULL,
+         duration_ms       INTEGER NOT NULL,
+         reps              INTEGER,
+         weight_g          INTEGER,
+         exercise_category INTEGER,
+         exercise_name     INTEGER,
+         step_index        INTEGER,
+         has_plan          INTEGER NOT NULL CHECK (has_plan IN (0, 1)),
+         plan_reps         INTEGER,
+         plan_weight_g     INTEGER,
+         hr_avg            INTEGER,
+         hr_max            INTEGER,
+         rest_after_ms     INTEGER,
+         PRIMARY KEY (activity_id, message_index)
+     ) WITHOUT ROWID;
+     CREATE TABLE set_correction (
+         activity_id       INTEGER NOT NULL REFERENCES activity (id),
+         message_index     INTEGER NOT NULL,
+         weight_g          INTEGER,
+         reps              INTEGER,
+         exercise_category INTEGER,
+         exercise_name     INTEGER,
+         counted           INTEGER CHECK (counted IN (0, 1)),
+         updated_at        TEXT NOT NULL,
+         PRIMARY KEY (activity_id, message_index)
+     ) WITHOUT ROWID;
+     CREATE TABLE added_set (
+         id                INTEGER PRIMARY KEY CHECK (id > 0),
+         activity_id       INTEGER NOT NULL REFERENCES activity (id),
+         after_kind        TEXT CHECK (after_kind IN ('recorded', 'added')),
+         after_value       INTEGER,
+         exercise_category INTEGER NOT NULL,
+         exercise_name     INTEGER,
+         weight_g          INTEGER,
+         reps              INTEGER,
+         counted           INTEGER CHECK (counted IN (0, 1)),
+         created_at        TEXT NOT NULL,
+         deleted_at        TEXT,
+         CHECK ((after_kind IS NULL) = (after_value IS NULL))
+     );
+     CREATE INDEX added_set_activity ON added_set (activity_id);
+     CREATE TABLE exercise_title (
+         category INTEGER NOT NULL,
+         name     INTEGER NOT NULL,
+         title    TEXT NOT NULL,
+         seen_at  TEXT NOT NULL,
+         PRIMARY KEY (category, name)
+     ) WITHOUT ROWID;
+     CREATE TABLE garmin_sync (
+         id               INTEGER PRIMARY KEY CHECK (id = 1),
+         last_success_at  TEXT,
+         last_error       TEXT,
+         history_complete INTEGER NOT NULL DEFAULT 0 CHECK (history_complete IN (0, 1))
+     );",
 ];
 
 /// Applies every migration the database has not seen yet.
@@ -77,6 +163,9 @@ mod tests {
         assert_eq!(user_version(&conn), i64::try_from(MIGRATIONS.len()).unwrap());
         assert!(table_exists(&conn, "app_settings"));
         assert!(table_exists(&conn, "garmin_connection"));
+        for table in ["activity", "activity_file", "recorded_set", "set_correction", "added_set", "exercise_title", "garmin_sync"] {
+            assert!(table_exists(&conn, table), "{table}");
+        }
         // Running again is a no-op rather than a "table already exists" failure.
         migrate(&mut conn).unwrap();
     }

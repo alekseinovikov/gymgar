@@ -1,7 +1,8 @@
 //! Store errors. Every failure of the database becomes a value of [`StoreError`]; nothing in this crate panics.
 //!
 //! The variants are what callers can act on: `Busy` means "try again", `Corrupt` means "this file cannot be
-//! trusted", `Open` means "the database could not be brought up at this path", `Sql` is everything else.
+//! trusted", `Open` means "the database could not be brought up at this path", `NotFound` means "the record you
+//! named does not exist", `Sql` is everything else.
 
 use std::path::PathBuf;
 
@@ -19,6 +20,9 @@ pub enum StoreError {
     /// The file is not a SQLite database, is damaged, or holds a value this version of Gymgar cannot read.
     #[error("the database is corrupt: {0}")]
     Corrupt(String),
+    /// The record a write names does not exist (an unknown activity or set); nothing was changed. The text says which.
+    #[error("not found: {0}")]
+    NotFound(String),
     /// Any other SQLite failure.
     #[error("database error: {0}")]
     Sql(String),

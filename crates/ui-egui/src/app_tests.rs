@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use egui::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
-use gymgar_domain::{ConnectionStatus, Language, SecretBackend};
-use gymgar_engine::testing::{TestConfig, connection_at, save_connection, test_session_on, test_session_with};
+use gymgar_domain::{ActivityId, ConnectionStatus, Language, SecretBackend};
+use gymgar_engine::testing::{FakeGarminSession, RequestKind, TestConfig, connection_at, save_connection, test_session_on, test_session_with};
 use gymgar_engine::{Caller, EngineError, GarminAuthError, Outcome, SecretStore};
 use gymgar_store::Store;
 use secrecy::SecretString;
@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::Section;
 use crate::i18n::{self, Lang};
-use crate::test_support::{TEST_LOCALE, app, harness};
+use crate::test_support::{TEST_LOCALE, app, app_seeded, harness, listed, store_activities};
 use crate::theme::metrics;
 
 fn config(garmin: Result<(), GarminAuthError>, deferred: bool) -> TestConfig {
@@ -50,7 +50,7 @@ fn rail_shows_summary_and_settings() {
 }
 
 #[test]
-fn the_rail_has_only_two_buttons_summary_on_top_and_settings_at_the_bottom() {
+fn the_rail_has_summary_and_activities_on_top_and_settings_at_the_bottom() {
     let (app, _handles) = app(TestConfig::default());
     let harness = harness(app);
     // The buttons of the rail only: the screen beside it has buttons of its own.
@@ -61,13 +61,37 @@ fn the_rail_has_only_two_buttons_summary_on_top_and_settings_at_the_bottom() {
         .map(|button| (button.accesskit_node().label().unwrap_or_default(), button.rect()))
         .collect();
     let labels: Vec<_> = buttons.iter().map(|(label, _)| label.as_str()).collect();
-    assert_eq!(labels, ["Summary", "Settings"], "{buttons:?}");
-    let (summary, settings) = (buttons[0].1, buttons[1].1);
-    assert!(summary.top() < settings.top(), "Summary is above Settings");
-    assert!(summary.top() < 100.0, "Summary sits at the top: {summary:?}");
+    assert_eq!(labels, ["Summary", "Activities", "Settings"], "{buttons:?}");
+    let (summary, activities, settings) = (buttons[0].1, buttons[1].1, buttons[2].1);
+    assert!(summary.top() < activities.top() && activities.top() < settings.top(), "Summary, then Activities, then Settings");
+    assert!(summary.top() < 100.0 && activities.top() < 150.0, "Summary and Activities sit at the top: {summary:?} {activities:?}");
     assert!(settings.bottom() > 700.0, "Settings sits at the bottom of the 800 px window: {settings:?}");
-    assert_eq!(summary.left(), settings.left(), "one column");
+    assert_eq!((summary.left(), activities.left()), (settings.left(), settings.left()), "one column");
     assert!(summary.right() < 100.0, "a narrow rail on the left: {summary:?}");
+}
+
+#[test]
+fn rail_shows_activities_with_badge() {
+    // Two activities came with the last sync and are not opened yet: their number is on the rail.
+    let now = TestConfig::default().now;
+    let two_new = [
+        listed(9_000_000_000_001, "strength_training", Some("Upper A"), now - chrono::TimeDelta::hours(2), true),
+        listed(9_000_000_000_002, "running", None, now - chrono::TimeDelta::hours(5), true),
+    ];
+    let (app, _handles) = app_seeded(Lang::En, TestConfig::default(), true, |store| store_activities(store, &two_new));
+    let mut harness = harness(app);
+    let badge = |harness: &egui_kittest::Harness<'_, GymgarApp>| harness.get_by_role_and_label(Role::Button, "Activities").accesskit_node().value();
+    assert_eq!(badge(&harness).as_deref(), Some("2"));
+
+    // The user opens one of them (task 13 does it from the list; here through the engine): one is left.
+    harness.state_mut().run("activity.markSeen", json!({ "id": 9_000_000_000_001_i64 })).expect("mark it seen");
+    harness.run();
+    assert_eq!(badge(&harness).as_deref(), Some("1"));
+    harness.state_mut().run("activity.markSeen", json!({ "id": 9_000_000_000_002_i64 })).expect("mark it seen");
+    harness.run();
+    assert_eq!(badge(&harness), None, "no badge without new activities");
+    // The section's name does not change with the count.
+    harness.get_by_role_and_label(Role::Button, "Activities");
 }
 
 #[test]
@@ -178,52 +202,74 @@ fn tick_asks_to_run_again_within_a_second_so_an_idle_window_keeps_polling() {
 }
 
 #[test]
-fn tick_checks_a_saved_connection_once_at_start() {
+fn startup_runs_reparse_then_sync_once() {
+    // Ruling 4: at start, a connected app reads the stored files again (if a newer parser can), and syncs once that is
+    // over. The two never overlap, and neither starts again.
     let (mut app, handles) = connected_app(config(Ok(()), true));
-    let spawner = handles.spawner.expect("a deferred spawner");
-    let ctx = egui::Context::default();
-    for _ in 0..3 {
-        app.tick(&ctx);
-    }
-    assert_eq!(spawner.pending(), 1, "exactly one garmin.verify job");
-    assert!(app.status().expect("status").check_running);
-
-    // Once it has run, it is not started again.
-    spawner.run_pending();
-    for _ in 0..3 {
-        app.tick(&ctx);
-    }
-    assert_eq!(spawner.pending(), 0);
-}
-
-#[test]
-fn startup_verify_runs_once_when_connected() {
-    // A saved connection with its key in the store: three ticks queue one job, and it is the check of that key.
-    let (mut connected, handles) = connected_app(config(Ok(()), true));
     handles.file.set(&SecretString::from("the-saved-key")).expect("save the key");
     let spawner = handles.spawner.expect("a deferred spawner");
     let ctx = egui::Context::default();
     for _ in 0..3 {
-        connected.tick(&ctx);
+        app.tick(&ctx);
     }
-    assert_eq!(spawner.pending(), 1);
-    assert_eq!(handles.garmin.calls(), 0, "the exchange happens in the background job, not on the UI thread");
-    spawner.run_pending();
-    connected.tick(&ctx);
-    assert_eq!((handles.garmin.calls(), handles.garmin.last_key().as_deref()), (1, Some("the-saved-key")));
-    assert_eq!(status_of(&connected), ConnectionStatus::Connected);
-    for _ in 0..3 {
-        connected.tick(&ctx);
-    }
-    assert_eq!((spawner.pending(), handles.garmin.calls()), (0, 1), "once per run of the app");
+    assert_eq!(spawner.pending(), 1, "the re-parse, and nothing else yet");
+    assert!(matches!(app.startup, Startup::Reparsing(_)), "{:?}", app.startup);
+    assert!(!app.status().expect("status").sync.running, "the sync waits for the re-parse");
+    assert!(!app.is_enabled("garmin.sync"), "the engine keeps them apart too");
 
-    // Nothing connected: nothing to check.
-    let (mut empty, handles) = app(config(Ok(()), true));
+    spawner.run_pending();
+    app.tick(&ctx);
+    assert!(app.status().expect("status").sync.running, "the sync starts as soon as the re-parse has ended");
+    assert_eq!((spawner.pending(), app.startup), (1, Startup::Done));
+    assert_eq!(handles.garmin.opens(), 0, "the key is read in the background job, not on the UI thread");
+
+    spawner.run_pending();
+    for _ in 0..3 {
+        app.tick(&ctx);
+    }
+    assert_eq!(spawner.pending(), 0, "once per run of the app");
+    let status = app.status().expect("status");
+    assert!(!status.sync.running);
+    assert!(status.sync.last_success_at.is_some(), "{status:?}");
+    // The sync checked the key itself (spec §2, item 1): there is no separate garmin.verify.
+    assert_eq!((handles.session.count(RequestKind::Verify), handles.garmin.calls()), (1, 0));
+    assert_eq!(handles.garmin.opened_key().as_deref(), Some("the-saved-key"));
+    assert_eq!(status.status, ConnectionStatus::Connected);
+    assert_eq!(app.error(), None, "nothing went wrong");
+
+    // Nothing connected: nothing to re-parse or sync.
+    let (mut empty, handles) = crate::test_support::app(config(Ok(()), true));
     let spawner = handles.spawner.expect("a deferred spawner");
     for _ in 0..3 {
         empty.tick(&ctx);
     }
-    assert_eq!((spawner.pending(), handles.garmin.calls()), (0, 0));
+    assert_eq!((spawner.pending(), handles.garmin.opens(), empty.startup), (0, 0, Startup::Done));
+}
+
+#[test]
+fn startup_runs_the_sync_inline_too() {
+    // The real runtime may finish the re-parse before the next frame: the sync still follows, once.
+    let (mut app, handles) = connected_app(config(Ok(()), false));
+    handles.file.set(&SecretString::from("the-saved-key")).expect("save the key");
+    let ctx = egui::Context::default();
+    for _ in 0..5 {
+        app.tick(&ctx);
+    }
+    assert_eq!(handles.session.count(RequestKind::Verify), 1);
+    assert!(app.status().expect("status").sync.last_success_at.is_some());
+}
+
+#[test]
+fn a_startup_that_cannot_start_is_logged_not_shown() {
+    // The re-parse cannot start while a sync the user asked for runs: the start-up goes on to its sync, which cannot
+    // start either. Neither is the user's error.
+    let (mut app, handles) = connected_app(config(Ok(()), true));
+    let spawner = handles.spawner.expect("a deferred spawner");
+    app.startup = Startup::Pending;
+    let Ok(Outcome::Started(_)) = app.run("garmin.sync", Value::Null) else { panic!("garmin.sync did not start") };
+    app.tick(&egui::Context::default());
+    assert_eq!((spawner.pending(), app.startup), (1, Startup::Done));
+    assert_eq!(app.error(), None);
 }
 
 /// A database file holding a saved connection, with the table of the connection renamed away so the status cannot be
@@ -244,7 +290,7 @@ fn restore(path: &std::path::Path) {
 }
 
 #[test]
-fn startup_verify_waits_until_the_status_can_be_read() {
+fn startup_waits_until_the_status_can_be_read() {
     let (mut app, handles, _dir, path) = app_with_an_unreadable_status();
     let spawner = handles.spawner.expect("a deferred spawner");
     let ctx = egui::Context::default();
@@ -257,7 +303,7 @@ fn startup_verify_waits_until_the_status_can_be_read() {
     assert!(app.status().is_none());
     assert_eq!(spawner.pending(), 0);
 
-    // Once the status can be read, the saved connection is checked, once.
+    // Once the status can be read, the import starts with the re-parse, once.
     restore(&path);
     for _ in 0..3 {
         app.next_store_poll = Instant::now();
@@ -293,18 +339,24 @@ fn tick_does_not_check_when_nothing_is_connected() {
 
 #[test]
 fn a_finished_check_that_failed_still_updates_the_status() {
-    // The job answers Err(KeyMissing) (no key in the store), yet the status it recorded is what the UI must show.
+    // The start-up sync finds no key in the store (Err(KeyMissing)): the status it recorded is what the UI must show.
     let (mut app, handles) = connected_app(config(Ok(()), true));
     let spawner = handles.spawner.expect("a deferred spawner");
     let ctx = egui::Context::default();
     app.tick(&ctx);
     assert_eq!(status_of(&app), ConnectionStatus::Connected);
 
+    // The re-parse ends, and the sync starts.
+    spawner.run_pending();
+    app.tick(&ctx);
+    assert_eq!(status_of(&app), ConnectionStatus::Connected);
     spawner.run_pending();
     app.tick(&ctx);
     let status = app.status().expect("status");
     assert_eq!(status.status, ConnectionStatus::KeyMissing);
-    assert!(!status.check_running);
+    assert_eq!(status.sync.last_error, Some(gymgar_domain::SyncErrorKind::KeyMissing));
+    assert!(!status.check_running && !status.sync.running);
+    assert_eq!(app.error(), None, "the list says why; it is not an error of the window");
 }
 
 #[test]
@@ -321,6 +373,73 @@ fn a_connect_job_that_succeeds_clears_the_draft_and_updates_the_status() {
     assert_eq!(status_of(&app), ConnectionStatus::Connected);
     let form = &app.ui.connect;
     assert_eq!((form.pending, form.error.as_deref(), form.key.as_str(), form.replacing), (None, None, "", false));
+}
+
+#[test]
+fn connecting_garmin_starts_the_first_import() {
+    // Ruling 19: Garmin connected in the window loads the workouts by itself (spec §2, items 1 and 16), once.
+    let (mut app, handles) = crate::test_support::app_in(Lang::En, config(Ok(()), true));
+    let spawner = handles.spawner.expect("a deferred spawner");
+    let ctx = egui::Context::default();
+    let Ok(Outcome::Started(job)) = app.run("garmin.connect", json!({ "apiKey": "the-pasted-key", "keyTerm": 365 })) else { panic!("connect did not start") };
+    app.ui.connect.pending = Some(job);
+    spawner.run_pending();
+    app.tick(&ctx);
+    assert_eq!(status_of(&app), ConnectionStatus::Connected);
+    assert!(app.status().expect("status").sync.running, "the sync started with the connection");
+    assert_eq!(spawner.pending(), 1, "the sync, and nothing else");
+    spawner.run_pending();
+    for _ in 0..3 {
+        app.tick(&ctx);
+    }
+    assert_eq!(spawner.pending(), 0, "once");
+    let status = app.status().expect("status");
+    assert!(!status.sync.running && status.sync.last_success_at.is_some(), "{status:?}");
+    assert_eq!(handles.garmin.opened_key().as_deref(), Some("the-pasted-key"), "with the key just connected");
+
+    // A key Garmin refused starts nothing.
+    let (mut app, handles) = crate::test_support::app_in(Lang::En, config(Err(GarminAuthError::KeyRejected), true));
+    let spawner = handles.spawner.expect("a deferred spawner");
+    let Ok(Outcome::Started(job)) = app.run("garmin.connect", json!({ "apiKey": "a-key-with-a-typo", "keyTerm": 365 })) else {
+        panic!("connect did not start")
+    };
+    app.ui.connect.pending = Some(job);
+    spawner.run_pending();
+    for _ in 0..3 {
+        app.tick(&ctx);
+    }
+    assert_eq!(status_of(&app), ConnectionStatus::NotConnected);
+    assert_eq!((spawner.pending(), app.status().expect("status").sync.running), (0, false));
+    assert_eq!(handles.garmin.opens(), 0);
+}
+
+#[test]
+fn a_key_replaced_while_the_files_are_read_again_leads_to_one_sync_after_them() {
+    // The start-up re-parse runs when the user replaces the key: its sync and the connection's are the same one, and it
+    // waits for the re-parse (the two never overlap).
+    let (mut app, handles) = connected_app(config(Ok(()), true));
+    handles.file.set(&SecretString::from("the-saved-key")).expect("save the key");
+    let spawner = handles.spawner.expect("a deferred spawner");
+    let ctx = egui::Context::default();
+    app.tick(&ctx);
+    assert!(matches!(app.startup, Startup::Reparsing(_)), "{:?}", app.startup);
+    let Ok(Outcome::Started(job)) = app.run("garmin.connect", json!({ "apiKey": "the-new-key", "keyTerm": 365 })) else { panic!("connect did not start") };
+    app.ui.connect.pending = Some(job);
+    assert_eq!(spawner.pending(), 2, "the re-parse and the key check");
+    spawner.run_pending();
+    app.tick(&ctx);
+    assert_eq!(app.startup, Startup::Done);
+    assert!(app.status().expect("status").sync.running);
+    // The old key, in another store than the new one, is deleted by a job of its own; the sync is the other one.
+    spawner.run_pending();
+    for _ in 0..3 {
+        app.tick(&ctx);
+        spawner.run_pending();
+    }
+    assert_eq!(spawner.pending(), 0);
+    // Every sync begins with a check of the key: one check, one sync.
+    assert_eq!(handles.session.count(RequestKind::Verify), 1);
+    assert!(app.status().expect("status").sync.last_success_at.is_some());
 }
 
 #[test]
@@ -350,6 +469,29 @@ fn a_connect_job_that_fails_shows_why_and_keeps_the_key_to_correct() {
 }
 
 #[test]
+fn a_connect_job_the_runtime_dropped_frees_the_form() {
+    let (mut app, handles) = app(config(Ok(()), true));
+    let spawner = handles.spawner.expect("a deferred spawner");
+    app.ui.connect.key = "the-pasted-key".to_owned();
+    let Ok(Outcome::Started(job)) = app.run("garmin.connect", json!({ "apiKey": "the-pasted-key", "keyTerm": 365 })) else { panic!("connect did not start") };
+    app.ui.connect.pending = Some(job);
+    let ctx = egui::Context::default();
+    app.tick(&ctx);
+    assert!(app.status().expect("status").check_running);
+
+    // The runtime lets the job go without running it (it shut down, say): the form must not wait for it forever.
+    spawner.drop_pending();
+    app.tick(&ctx);
+    let form = &app.ui.connect;
+    assert_eq!(form.pending, None);
+    assert_eq!(form.error.as_deref(), Some("Something went wrong. Please try again."));
+    assert_eq!(form.key, "the-pasted-key", "the key stays to try again");
+    assert!(!app.status().expect("status").check_running);
+    assert!(app.is_enabled("garmin.connect"), "connect can be tried again");
+    assert_eq!(handles.garmin.calls(), 0);
+}
+
+#[test]
 fn a_job_nobody_is_waiting_for_leaves_the_form_alone() {
     let (mut app, _handles) = connected_app(config(Ok(()), false));
     app.ui.connect.key = "half-typed".to_owned();
@@ -362,13 +504,173 @@ fn a_job_nobody_is_waiting_for_leaves_the_form_alone() {
 }
 
 #[test]
+fn a_frame_that_applied_only_partial_results_refreshes_the_status() {
+    // Fifteen strength workouts whose files Garmin garbles: the sync sends more results than one frame applies.
+    let garmin = Arc::new(FakeGarminSession::new());
+    let items: Vec<Value> = (1..=15_i64)
+        .map(|n| json!({ "activityId": n, "activityType": { "typeKey": "strength_training" }, "startTimeGMT": format!("2026-10-{n:02} 10:00:00") }))
+        .collect();
+    garmin.set_pages(vec![Value::Array(items).to_string().into_bytes()]);
+    for n in 1..=15 {
+        garmin.set_file(ActivityId(n), b"not a zip".to_vec());
+    }
+    let (mut app, handles) = connected_app(TestConfig { session: Some(garmin), ..config(Ok(()), true) });
+    handles.file.set(&SecretString::from("the-saved-key")).expect("save the key");
+    // The start-up import is over, so this sync is the only job.
+    app.startup = Startup::Done;
+    let spawner = handles.spawner.expect("a deferred spawner");
+    let ctx = egui::Context::default();
+    let Ok(Outcome::Started(_)) = app.run("garmin.sync", Value::Null) else { panic!("garmin.sync did not start") };
+    assert!(app.status().expect("status").sync.running, "the run refreshed the status");
+
+    // The job runs to its end; the window takes what it sent over the next frames.
+    spawner.run_pending();
+    app.tick(&ctx);
+    let sync = &app.status().expect("status").sync;
+    assert!(sync.running, "the end of the sync has not been applied yet");
+    assert!(sync.files_done > 0 && sync.files_done < sync.files_total, "the partial results were applied and the status read again: {sync:?}");
+
+    app.tick(&ctx);
+    let sync = &app.status().expect("status").sync;
+    assert!(!sync.running);
+    assert!(sync.last_success_at.is_some());
+}
+
+#[test]
 fn run_refreshes_the_status_after_a_change() {
     let (mut app, _handles) = connected_app(config(Ok(()), false));
-    assert_eq!(status_of(&app), ConnectionStatus::Connected);
+    assert!(!app.status().expect("status").check_running);
     // A query needs no refresh (and must not start one: refreshing is itself a query).
     assert!(matches!(app.run("garmin.status", Value::Null), Ok(Outcome::Done(_))));
-    assert!(matches!(app.run("garmin.disconnect", Value::Null), Ok(Outcome::Done(_))));
-    assert_eq!(status_of(&app), ConnectionStatus::NotConnected, "disconnect shows without waiting for a tick");
+    assert!(matches!(app.run("garmin.verify", Value::Null), Ok(Outcome::Started(_))));
+    assert!(app.status().expect("status").check_running, "the running check shows without waiting for a tick");
+}
+
+/// [`connected_app`] whose start-up import is over, so the jobs a test starts are the only ones.
+fn settled_app(cfg: TestConfig) -> (GymgarApp, gymgar_engine::testing::TestHandles) {
+    let (mut app, handles) = connected_app(cfg);
+    app.startup = Startup::Done;
+    (app, handles)
+}
+
+/// A file database with a saved connection and its key, whose activity table refuses every write from the moment
+/// `break_writes` is called: what a full disk or a lock that lasts too long does to a sync.
+fn app_whose_writes_fail(pages: usize) -> (GymgarApp, gymgar_engine::testing::TestHandles, tempfile::TempDir, impl Fn()) {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = dir.path().join("gymgar.sqlite3");
+    let garmin = Arc::new(FakeGarminSession::new());
+    // One run per page: each page is a partial result of its own.
+    let page = |n: usize| json!([{ "activityId": n, "activityType": { "typeKey": "running" }, "startTimeGMT": format!("2026-10-{:02} 10:00:00", n % 28 + 1) }]);
+    garmin.set_pages((1..=pages).map(|n| page(n).to_string().into_bytes()).collect());
+    let cfg = TestConfig { session: Some(garmin), ..config(Ok(()), true) };
+    let (session, handles) = test_session_on(Store::open(&path).expect("open the database"), cfg.clone());
+    save_connection(&session, &connection_at(cfg.now, SecretBackend::File));
+    handles.file.set(&SecretString::from("the-saved-key")).expect("save the key");
+    let mut app = GymgarApp::with_system_locale(session, UiState::default(), Some(TEST_LOCALE.to_owned()));
+    app.startup = Startup::Done;
+    let break_writes = move || {
+        rusqlite::Connection::open(&path)
+            .expect("open the file")
+            .execute_batch("CREATE TRIGGER no_writes BEFORE INSERT ON activity BEGIN SELECT RAISE(ABORT, 'the disk is full'); END;")
+            .expect("add the trigger");
+    };
+    (app, handles, dir, break_writes)
+}
+
+#[test]
+fn a_partial_result_that_fails_is_reported_once_per_sync() {
+    // Ruling 13: a page of the sync that cannot be written is shown in the banner (with the text for its kind of error),
+    // once per run however many pages fail, and the sync's own line says what it means.
+    let (mut app, handles, _dir, break_writes) = app_whose_writes_fail(40);
+    let spawner = handles.spawner.expect("a deferred spawner");
+    let ctx = egui::Context::default();
+    let Ok(Outcome::Started(_)) = app.run("garmin.sync", Value::Null) else { panic!("garmin.sync did not start") };
+    spawner.run_pending();
+    break_writes();
+    let store_text = "Gymgar could not access its data. Check that the disk is available and try again.";
+
+    // The first frame applies a few dozen of the 40 pages, all refused.
+    app.tick(&ctx);
+    assert!(app.status().expect("status").sync.running, "more pages wait for the next frame");
+    assert_eq!(app.error(), Some(store_text));
+    // Whatever the next frames bring of the same run, the banner is not raised again.
+    app.reported = None;
+    for _ in 0..3 {
+        app.tick(&ctx);
+    }
+    assert_eq!(app.error(), None, "once per sync");
+    let sync = &app.status().expect("status").sync;
+    assert!(!sync.running);
+    assert_eq!(sync.last_error, Some(gymgar_domain::SyncErrorKind::Storage));
+
+    // The next run that fails is reported again.
+    let Ok(Outcome::Started(_)) = app.run("garmin.sync", Value::Null) else { panic!("garmin.sync did not start") };
+    spawner.run_pending();
+    for _ in 0..3 {
+        app.tick(&ctx);
+    }
+    assert_eq!(app.error(), Some(store_text));
+}
+
+#[test]
+fn a_reported_failure_stays_until_the_user_does_something_that_works() {
+    let (mut app, _handles) = settled_app(config(Ok(()), false));
+    app.report("Something went wrong. Please try again.");
+    // Refreshes come and go (a job ended, another process wrote): the note stays.
+    app.next_store_poll = Instant::now();
+    app.status = None;
+    app.tick(&egui::Context::default());
+    assert_eq!(app.error(), Some("Something went wrong. Please try again."));
+    // The user changes something, and it works: the note is old news.
+    app.run("settings.setLanguage", json!({ "language": "en" })).expect("set the language");
+    assert_eq!(app.error(), None);
+}
+
+#[test]
+fn a_disconnect_job_that_succeeds_clears_the_card() {
+    let (mut app, handles) = settled_app(config(Ok(()), true));
+    let spawner = handles.spawner.expect("a deferred spawner");
+    app.ui.connect.replacing = true;
+    app.ui.connect.error = Some("an old error".to_owned());
+    let Ok(Outcome::Started(job)) = app.run("garmin.disconnect", Value::Null) else { panic!("disconnect did not start") };
+    app.ui.connect.disconnecting = Some(job);
+    let ctx = egui::Context::default();
+
+    // While the job runs, the card waits for it.
+    app.tick(&ctx);
+    assert_eq!(app.ui.connect.disconnecting, Some(job));
+    assert_eq!(status_of(&app), ConnectionStatus::Connected);
+
+    spawner.run_pending();
+    app.tick(&ctx);
+    let form = &app.ui.connect;
+    assert_eq!((form.disconnecting, form.error.as_deref(), form.replacing), (None, None, false));
+    assert_eq!(status_of(&app), ConnectionStatus::NotConnected);
+}
+
+#[test]
+fn a_disconnect_job_that_fails_or_is_dropped_says_so_and_can_be_tried_again() {
+    for (dropped, text) in
+        [(false, "Gymgar could not use the password store. Check that it is unlocked and try again."), (true, "Something went wrong. Please try again.")]
+    {
+        let (mut app, handles) = settled_app(config(Ok(()), true));
+        let spawner = handles.spawner.expect("a deferred spawner");
+        handles.file.set_failing(true);
+        let Ok(Outcome::Started(job)) = app.run("garmin.disconnect", Value::Null) else { panic!("disconnect did not start") };
+        app.ui.connect.disconnecting = Some(job);
+        if dropped {
+            spawner.drop_pending();
+        } else {
+            spawner.run_pending();
+        }
+        app.tick(&egui::Context::default());
+
+        assert_eq!(app.ui.connect.disconnecting, None, "dropped: {dropped}");
+        assert_eq!(app.ui.connect.error.as_deref(), Some(text));
+        assert_eq!(status_of(&app), ConnectionStatus::Connected, "dropped: {dropped}");
+        handles.file.set_failing(false);
+        assert!(app.is_enabled("garmin.disconnect"), "dropped: {dropped}");
+    }
 }
 
 #[test]
@@ -399,10 +701,12 @@ fn every_error() -> Vec<EngineError> {
         EngineError::Garmin(GarminAuthError::Unavailable),
         EngineError::Garmin(GarminAuthError::Network),
         EngineError::Garmin(GarminAuthError::Unexpected),
+        EngineError::Garmin(GarminAuthError::NotFound),
         EngineError::FileStoreConsentRequired,
         EngineError::NotConnected,
         EngineError::KeyMissing,
         EngineError::JobPanicked("garmin.connect".into()),
+        EngineError::JobDropped("garmin.connect".into()),
         EngineError::CommandPanicked("garmin.status".into()),
     ]
 }
@@ -475,4 +779,16 @@ fn a_database_that_cannot_be_read_is_reported_in_the_window() {
     harness.get_by_role_and_label(Role::Button, "Settings").click();
     harness.run();
     assert_eq!(harness.state().ui.section, Section::Settings);
+}
+
+#[test]
+fn a_screen_is_never_wider_than_a_small_window() {
+    // The smallest window, 800 points: the content stops at its right edge, not at the width a large window allows. A
+    // long text that wraps shows where that is: the warning before the key goes to a file.
+    let (app, _handles) = app(TestConfig { system_store: false, ..TestConfig::default() });
+    let mut harness = crate::test_support::harness_sized(app, egui::vec2(800.0, 500.0));
+    harness.state_mut().ui.section = Section::Settings;
+    harness.run();
+    let warning = harness.get_by_label_contains("Save the key to the file").rect();
+    assert!(warning.right() <= 800.0 - f32::from(metrics::SCREEN_MARGIN), "the warning runs past the window: {warning:?}");
 }

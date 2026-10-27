@@ -9,16 +9,18 @@ use std::sync::{Arc, LazyLock};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     House,
+    Dumbbell,
     Settings,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 2] = [Icon::House, Icon::Settings];
+    pub const ALL: [Icon; 3] = [Icon::House, Icon::Dumbbell, Icon::Settings];
 
     /// The address the image loaders know this icon by; it ends in `.svg`, which is how they pick the SVG loader.
     fn uri(self) -> &'static str {
         match self {
             Icon::House => "bytes://gymgar/icons/house.svg",
+            Icon::Dumbbell => "bytes://gymgar/icons/dumbbell.svg",
             Icon::Settings => "bytes://gymgar/icons/settings.svg",
         }
     }
@@ -26,9 +28,11 @@ impl Icon {
     /// The SVG, white where Lucide says `currentColor`.
     pub(crate) fn svg(self) -> Arc<[u8]> {
         static HOUSE: LazyLock<Arc<[u8]>> = LazyLock::new(|| white(include_str!("../../../assets/icons/house.svg")));
+        static DUMBBELL: LazyLock<Arc<[u8]>> = LazyLock::new(|| white(include_str!("../../../assets/icons/dumbbell.svg")));
         static SETTINGS: LazyLock<Arc<[u8]>> = LazyLock::new(|| white(include_str!("../../../assets/icons/settings.svg")));
         match self {
             Icon::House => Arc::clone(&HOUSE),
+            Icon::Dumbbell => Arc::clone(&DUMBBELL),
             Icon::Settings => Arc::clone(&SETTINGS),
         }
     }

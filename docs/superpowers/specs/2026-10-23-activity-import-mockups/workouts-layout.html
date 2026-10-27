@@ -1,0 +1,145 @@
+<style>
+  .w { --bg:#0d0f0e; --chrome:#121513; --card:#171b18; --field:#0f1210; --border:#262c27; --text:#eef2ec; --dim:#8a958c; --accent:#c4f135; --soft:#2a3410; --warn:#ff7a45; }
+  .w-win { background:var(--bg); color:var(--text); border-radius:10px; overflow:hidden; font:13px/1.45 -apple-system,"Segoe UI",Inter,sans-serif; height:560px; display:flex; flex-direction:column; border:1px solid var(--border); text-align:left; }
+  .w-title { height:26px; background:var(--chrome); display:flex; align-items:center; padding:0 10px; gap:6px; color:var(--dim); font-size:12px; flex-shrink:0; }
+  .w-dot { width:9px; height:9px; border-radius:50%; background:var(--border); display:inline-block; }
+  .w-body { flex:1; display:flex; min-height:0; }
+  .w-rail { width:50px; background:var(--chrome); border-right:1px solid var(--border); padding:10px 0; display:flex; flex-direction:column; align-items:center; gap:7px; flex-shrink:0; }
+  .w-ic { width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; opacity:.75; position:relative; }
+  .w-ic.on { background:var(--soft); opacity:1; box-shadow:inset 0 0 0 1px var(--accent); }
+  .w-badge { position:absolute; top:-4px; right:-6px; background:var(--accent); color:#0d0f0e; font-size:10px; font-weight:700; border-radius:8px; padding:0 5px; line-height:15px; }
+  .w-sp { flex:1; }
+  .w-list { width:270px; border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; flex-shrink:0; }
+  .w-lhead { padding:12px 12px 8px; display:flex; flex-direction:column; gap:8px; }
+  .w-h { font-size:16px; font-weight:650; }
+  .w-sub { color:var(--dim); font-size:12px; }
+  .w-chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .w-chip { border:1px solid var(--border); border-radius:12px; padding:1px 9px; font-size:12px; color:var(--dim); }
+  .w-chip.on { border-color:var(--accent); color:var(--accent); }
+  .w-items { overflow:hidden; flex:1; padding:0 6px; }
+  .w-week { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); padding:8px 6px 4px; }
+  .w-item { padding:7px 8px; border-radius:8px; display:flex; gap:8px; align-items:flex-start; }
+  .w-item.sel { background:var(--card); box-shadow:inset 0 0 0 1px var(--border); }
+  .w-item.other { opacity:.55; }
+  .w-new { width:7px; height:7px; border-radius:50%; background:var(--accent); margin-top:6px; flex-shrink:0; }
+  .w-nonew { width:7px; flex-shrink:0; }
+  .w-it { flex:1; min-width:0; }
+  .w-it b { font-weight:600; }
+  .w-detail { flex:1; padding:14px 18px; display:flex; flex-direction:column; gap:10px; min-width:0; overflow:hidden; }
+  .w-stats { display:flex; gap:18px; flex-wrap:wrap; }
+  .w-stat b { display:block; font-size:15px; }
+  .w-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 12px; }
+  .w-ex { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; }
+  .w-ex b { font-weight:650; }
+  table.w-sets { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .w-sets th { color:var(--dim); font-weight:500; text-align:left; padding:2px 6px; border-bottom:1px solid var(--border); }
+  .w-sets td { padding:3px 6px; border-bottom:1px solid #1d221e; }
+  .w-sets tr:last-child td { border-bottom:none; }
+  .w-fix { color:var(--accent); font-weight:600; }
+  .w-was { color:var(--dim); text-decoration:line-through; font-size:11px; margin-left:4px; }
+  .w-off td { color:var(--dim); text-decoration:line-through; }
+  .w-off td.w-why { text-decoration:none; font-style:italic; }
+  .w-generic { border-color:var(--warn); }
+  .w-warnt { color:var(--warn); }
+  .w-btn { display:inline-block; background:var(--accent); color:#0d0f0e; font-weight:650; border-radius:9px; padding:3px 11px; font-size:12px; }
+  .w-btn2 { display:inline-block; border:1px solid var(--border); color:var(--text); border-radius:9px; padding:2px 10px; font-size:12px; }
+  .w-sync { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dim); }
+  .w-step { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-secondary); margin:1.2rem 0 .4rem; }
+  .w-full { flex:1; padding:14px 18px; display:flex; flex-direction:column; gap:8px; min-width:0; overflow:hidden; }
+  .w-row { display:flex; gap:10px; align-items:center; padding:8px 12px; background:var(--card); border:1px solid var(--border); border-radius:10px; }
+  .w-row.other { background:transparent; opacity:.6; }
+  .w-row .w-cols { display:flex; gap:22px; color:var(--dim); font-size:12px; margin-left:auto; }
+</style>
+
+<h2>Экран «Тренировки»: какой вариант ближе?</h2>
+<p class="subtitle">Оба в стиле «Спорт», данные выдуманные. Салатовая точка — новая (ещё не открытая) тренировка. Несиловые активности приглушены. Можно кликнуть вариант, а подробности написать в чат.</p>
+
+<div class="options">
+
+<div class="option" data-choice="a" onclick="toggleSelect(this)">
+<div class="letter">A</div>
+<div class="content">
+<h3>Список слева, тренировка справа</h3>
+<p>Как почта: выбрал в списке — справа подходы. Удобно листать тренировки подряд и сравнивать.</p>
+
+<div class="w" style="margin-top:10px">
+<div class="w-win">
+  <div class="w-title"><span class="w-dot"></span><span class="w-dot"></span><span class="w-dot"></span>&nbsp; Gymgar</div>
+  <div class="w-body">
+    <div class="w-rail"><div class="w-ic">🏠</div><div class="w-ic on">🏋️<span class="w-badge">2</span></div><div class="w-sp"></div><div class="w-ic">⚙️</div></div>
+    <div class="w-list">
+      <div class="w-lhead">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span class="w-h">Тренировки</span><span class="w-btn2">↻ Обновить</span></div>
+        <div class="w-sync">● Загружено сегодня в 19:12</div>
+        <div class="w-chips"><span class="w-chip on">Все</span><span class="w-chip">Силовые</span><span class="w-chip">Новые · 2</span></div>
+      </div>
+      <div class="w-items">
+        <div class="w-week">Эта неделя</div>
+        <div class="w-item sel"><span class="w-new"></span><div class="w-it"><b>Верх А</b><div class="w-sub">Чт, 23 окт · 1:39 · 18 подходов</div></div></div>
+        <div class="w-item other"><span class="w-new"></span><div class="w-it">🏃 Бег<div class="w-sub">Ср, 22 окт · 5,2 км · 28:41</div></div></div>
+        <div class="w-item"><span class="w-nonew"></span><div class="w-it"><b>Низ Б</b><div class="w-sub">Вт, 21 окт · 1:12 · 15 подходов</div></div></div>
+        <div class="w-week">13–19 октября</div>
+        <div class="w-item"><span class="w-nonew"></span><div class="w-it"><b>Силовая тренировка</b><div class="w-sub">Сб, 18 окт · 0:54 · 11 подходов</div></div></div>
+        <div class="w-item"><span class="w-nonew"></span><div class="w-it"><b>Верх Б</b><div class="w-sub">Чт, 16 окт · 1:31 · 17 подходов</div></div></div>
+        <div class="w-item other"><span class="w-nonew"></span><div class="w-it">🚴 Велосипед<div class="w-sub">Ср, 15 окт · 21,0 км · 52:10</div></div></div>
+        <div class="w-item"><span class="w-nonew"></span><div class="w-it"><b>Низ А</b><div class="w-sub">Вт, 14 окт · 1:20 · 16 подходов</div></div></div>
+      </div>
+    </div>
+    <div class="w-detail">
+      <div><div class="w-h">Верх А</div><div class="w-sub">Четверг, 23 октября 2026 · 17:31–19:10 · по программе «Верх А»</div></div>
+      <div class="w-stats"><div class="w-stat"><span class="w-sub">Время</span><b>1:39</b></div><div class="w-stat"><span class="w-sub">Подходов</span><b>18</b></div><div class="w-stat"><span class="w-sub">Пульс ср.</span><b>112</b></div><div class="w-stat"><span class="w-sub">Калории</span><b>486</b></div></div>
+      <div class="w-card">
+        <div class="w-ex"><b>Жим штанги лёжа</b><span class="w-sub">план 4 × 8 · 80 кг</span></div>
+        <table class="w-sets"><tr><th>#</th><th>Вес</th><th>Повторы</th><th>Пульс</th><th>Время</th></tr>
+          <tr><td>1</td><td>80 кг</td><td>8</td><td>124</td><td>0:31</td></tr>
+          <tr><td>2</td><td>80 кг</td><td><span class="w-fix">8</span><span class="w-was">7</span></td><td>131</td><td>0:34</td></tr>
+          <tr><td>3</td><td><span class="w-fix">77,5 кг</span><span class="w-was">80</span></td><td>7</td><td>135</td><td>0:33</td></tr>
+          <tr class="w-off"><td>4</td><td>—</td><td>0</td><td>98</td><td class="w-why">пустой, не учитывается</td></tr>
+        </table>
+      </div>
+      <div class="w-card w-generic">
+        <div class="w-ex"><b class="w-warnt">Без упражнения</b><span class="w-btn">Указать упражнение</span></div>
+        <table class="w-sets"><tr><th>#</th><th>Вес</th><th>Повторы</th><th>Пульс</th><th>Время</th></tr>
+          <tr><td>1</td><td>—</td><td>—</td><td>118</td><td>0:42</td></tr>
+          <tr><td>2</td><td>—</td><td>—</td><td>121</td><td>0:40</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="option" data-choice="b" onclick="toggleSelect(this)">
+<div class="letter">B</div>
+<div class="content">
+<h3>Список на всю ширину, тренировка — отдельной страницей</h3>
+<p>В списке больше цифр по каждой тренировке. Клик открывает тренировку целиком (те же подходы, что справа в A), кнопка «← Назад» возвращает.</p>
+
+<div class="w" style="margin-top:10px">
+<div class="w-win" style="height:420px">
+  <div class="w-title"><span class="w-dot"></span><span class="w-dot"></span><span class="w-dot"></span>&nbsp; Gymgar</div>
+  <div class="w-body">
+    <div class="w-rail"><div class="w-ic">🏠</div><div class="w-ic on">🏋️<span class="w-badge">2</span></div><div class="w-sp"></div><div class="w-ic">⚙️</div></div>
+    <div class="w-full">
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="w-h">Тренировки</span><span class="w-sync">● Загружено сегодня в 19:12 &nbsp;<span class="w-btn2">↻ Обновить</span></span></div>
+      <div class="w-chips"><span class="w-chip on">Все</span><span class="w-chip">Силовые</span><span class="w-chip">Новые · 2</span></div>
+      <div class="w-week">Эта неделя</div>
+      <div class="w-row"><span class="w-new"></span><b>Верх А</b><span class="w-sub">Чт, 23 окт</span><span class="w-cols"><span>1:39</span><span>18 подходов</span><span>6 упражнений</span><span>пульс 112</span></span></div>
+      <div class="w-row other"><span class="w-new"></span>🏃 Бег<span class="w-sub">Ср, 22 окт</span><span class="w-cols"><span>28:41</span><span>5,2 км</span><span>пульс 148</span></span></div>
+      <div class="w-row"><span class="w-nonew"></span><b>Низ Б</b><span class="w-sub">Вт, 21 окт</span><span class="w-cols"><span>1:12</span><span>15 подходов</span><span>5 упражнений</span><span>пульс 108</span></span></div>
+      <div class="w-week">13–19 октября</div>
+      <div class="w-row"><span class="w-nonew"></span><b>Силовая тренировка</b><span class="w-sub">Сб, 18 окт</span><span class="w-cols"><span>0:54</span><span>11 подходов</span><span>4 упражнения</span><span>пульс 104</span></span></div>
+      <div class="w-row"><span class="w-nonew"></span><b>Верх Б</b><span class="w-sub">Чт, 16 окт</span><span class="w-cols"><span>1:31</span><span>17 подходов</span><span>6 упражнений</span><span>пульс 115</span></span></div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+</div>
+
+</div>
+
+<div class="w-step">Что показано в подходах (одинаково для A и B)</div>
+<p class="subtitle" style="text-align:left">Салатовое число — ваша правка, рядом зачёркнуто то, что записали часы. Пустой подход убран из учёта, но виден. Подходы «Без упражнения» выделены, чтобы их было легко найти и подписать.</p>

@@ -24,8 +24,9 @@ egui = { workspace = true }
 chrono = { workspace = true }
 log = { workspace = true }
 secrecy = { workspace = true }
-# One multi-thread runtime for the Garmin jobs, built by hand: `#[tokio::main]` panics when that fails.
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+# One multi-thread runtime for the Garmin jobs, built by hand: `#[tokio::main]` panics when that fails. `time` for the
+# pauses the jobs make between Garmin requests (`Services::sleep`).
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 [dev-dependencies]
 # A throwaway data directory: the tests never touch the real one.

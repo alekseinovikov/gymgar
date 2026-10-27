@@ -9,3 +9,15 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+gymgar-domain = { workspace = true }
+gymgar-garmin = { workspace = true }
+chrono = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# `fit::testing`: the FIT and ZIP writers behind the synthetic strength files.
+gymgar-garmin = { workspace = true, features = ["testing"] }

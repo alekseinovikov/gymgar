@@ -11,13 +11,17 @@ publish.workspace = true
 workspace = true
 
 [features]
-# Test doubles (in-memory secret stores, a fake Garmin, inline and deferred spawners) for the tests of crates built on
-# the engine. Apps never enable it.
+# Test doubles (in-memory secret stores, a fake Garmin and Garmin session, inline, deferred and dropping spawners, a
+# recording sleep) and seeds of activities from the scrubbed fixtures, for the tests of crates built on the engine. Apps
+# never enable it.
 testing = []
 
 [dependencies]
 gymgar-domain = { workspace = true }
 gymgar-store = { workspace = true }
+# Garmin's bytes into domain types (the activity list, strength files) and the import's pacing rules. The engine names no
+# `gymgar-garmin` type: the network is the `GarminSession` trait, which hands over raw bytes.
+gymgar-sync = { workspace = true }
 # `serde`: `garmin.status` reports dates in its JSON answer.
 chrono = { workspace = true, features = ["serde"] }
 futures = { workspace = true }
@@ -29,6 +33,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# `fit::testing`: the FIT and ZIP writers behind the synthetic strength files the sync tests serve.
+gymgar-garmin = { workspace = true, features = ["testing"] }
 # A file database shared by two connections, and raw SQL to plant a damaged setting.
 rusqlite = { workspace = true }
 tempfile = { workspace = true }

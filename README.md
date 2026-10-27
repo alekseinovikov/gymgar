@@ -6,7 +6,7 @@ English · [Русский](#русский)
 
 Gymgar is a native desktop app for strength training, written in Rust (egui/eframe, no webview). Its main value is analytics that Garmin Connect does not have: weight progress per exercise over time, muscle-group load by week and month, and how the body responds (sleep, HRV) in relation to training. All data comes from your Garmin account. The interface is in English and Russian, and an MCP server lets AI agents do what you do in the window.
 
-**Status: early.** This is the first of several projects. What works today: connecting Gymgar to Garmin Connect with your personal API key, showing the state of the connection (with a warning a week before the key expires), switching the interface language, and an MCP server that reports the connection state and can change the language. Loading activities, charts, reports and the workout editor come in later projects.
+**Status: early.** Two of several projects are done. What works today: connecting Gymgar to Garmin Connect with your personal API key (with a warning a week before the key expires), loading your activities from Garmin, the Activities screen where you look through strength workouts set by set and correct what the watch recorded wrong, switching the interface language, and an MCP server through which an agent can read and correct the same data. Charts, reports and the workout editor come in later projects.
 
 ### Build and run
 
@@ -45,6 +45,18 @@ Where the key is kept: in the macOS Keychain, the Windows Credential Manager or 
 
 A real key is 132 characters long. **On macOS, do not enter it into a terminal prompt, for example through the `security` tool asking for the password interactively: the terminal cuts the line at 128 characters, and Garmin then answers 401.** Paste the key into Gymgar's field, which takes any length.
 
+### Activities
+
+Once Garmin is connected, Gymgar loads your activities by itself in the background: when it starts, right after you connect, and when you click **Refresh** on the Activities screen. It never goes to Garmin on a timer while the window is open. The window does not freeze while it loads, and what is already loaded is always there, offline or with a key that stopped working.
+
+- **What is loaded.** Every activity Garmin returns appears in the list with its summary: type, name, date and time, duration, distance, heart rate and calories. For strength workouts Gymgar also downloads the original file the watch recorded, so every set is there: exercise, weight, reps, heart rate and rest. Other activities show the summary only.
+- **Gentle with Garmin.** Garmin does not publish request limits, so Gymgar asks for one thing at a time, pauses 2 seconds between files and, when Garmin answers "too many requests" or is unreachable, waits and tries again up to three times before it stops. Loading a long history for the first time can take ten minutes or more: there is a 2-second pause for each strength workout. If you close the window, the next start goes on where it stopped: what is loaded stays, and no workout file is downloaded twice.
+- **New workouts.** A workout that arrived in a later load and started after the newest one you already had is marked as new (a dot in the list, a number on the Activities icon and on Summary) until you open it. The first load marks nothing.
+- **Correcting sets.** A watch sometimes records a set wrongly: a skipped set, extra reps, a wrong weight, an exercise at the end of the workout that was not in the program. Click a set to change its weight and reps, to choose another exercise (first the ones you have done, then Garmin's catalog; for the whole card or for one set), to leave it out of the statistics or to add a set the watch missed. A corrected value is shown in the accent colour with what the watch recorded struck through, and **Reset to watch values** brings it back. A set with no reps, no weight and shorter than 10 seconds counts as empty and is left out automatically (you can count it again); warm-up and cardio sets are counted. A whole workout can be left out of the statistics too.
+- **Corrections stay in Gymgar.** They are kept next to the watch's record, and later downloads and re-reading the file do not touch them. They are not sent to Garmin, and corrections you made earlier in Garmin Connect are not imported, because Garmin's API does not give them.
+
+Weights are shown in kilograms.
+
 ### Use Gymgar from an AI agent (MCP)
 
 `gymgar-cli mcp` is an MCP server over stdio on the same database as the app. Build it and register it, for example in Claude Code:
@@ -54,7 +66,7 @@ cargo build --release -p gymgar-cli
 claude mcp add gymgar -- <path>/gymgar-cli mcp    # e.g. <path> = /path/to/gymgar/target/release
 ```
 
-Build the app and the CLI in the same profile (both release or both debug), or they will look at different data directories. The server offers two tools: `command_list` shows the commands an agent may run, with their parameters, and `command_run` runs one. Today an agent can read the connection state (`garmin.status`) and the settings (`settings.get`), and change the language (`settings.setLanguage`); an open Gymgar window switches within a second. An agent cannot enter, replace or delete the key, and `gymgar-cli` never opens the keychain.
+Build the app and the CLI in the same profile (both release or both debug), or they will look at different data directories. The server offers two tools: `command_list` shows the commands an agent may run, with their parameters, and `command_run` runs one. Today an agent can read the connection state (`garmin.status`) and the settings (`settings.get`), change the language (`settings.setLanguage`), list and read activities with their sets (`activity.list`, `activity.get`), search exercises (`exercise.search`) and correct sets (`activity.editSets`, `activity.resetSets`, `activity.addSet`, `activity.removeAddedSet`, `activity.setExcluded`); an open Gymgar window picks up a changed language or a correction within a second. An agent cannot enter, replace or delete the key, cannot start a download from Garmin and cannot mark workouts as seen (that mark is for your eyes), and `gymgar-cli` never opens the keychain or talks to Garmin.
 
 ### Licence
 
@@ -64,7 +76,7 @@ Build the app and the CLI in the same profile (both release or both debug), or t
 
 Gymgar — нативное desktop-приложение на Rust для силовых тренировок (egui/eframe, без webview). Главная ценность — аналитика, которой нет в Garmin Connect: прогресс весов по каждому упражнению во времени, нагрузка на группы мышц по неделям и месяцам, реакция тела (сон, ВСР) в связке с тренировками. Все данные приходят из вашего аккаунта Garmin. Интерфейс на английском и русском, а MCP-сервер позволяет агентам делать то же, что вы делаете в окне.
 
-**Статус: ранний.** Это первый из нескольких проектов. Сегодня работает: подключение Gymgar к Garmin Connect личным ключом API, статус подключения (с предупреждением за неделю до конца срока ключа), переключение языка интерфейса и MCP-сервер, который показывает статус подключения и умеет менять язык. Загрузка активностей, графики, отчёты и редактор тренировок появятся в следующих проектах.
+**Статус: ранний.** Готовы два из нескольких проектов. Сегодня работает: подключение Gymgar к Garmin Connect личным ключом API (с предупреждением за неделю до конца срока ключа), загрузка ваших активностей из Garmin, экран «Тренировки», где силовые тренировки видны по подходам и можно поправить то, что часы записали неверно, переключение языка интерфейса и MCP-сервер, через который агент читает и правит те же данные. Графики, отчёты и редактор тренировок появятся в следующих проектах.
 
 ### Сборка и запуск
 
@@ -103,6 +115,18 @@ Gymgar читает ваши данные через официальный Pers
 
 Настоящий ключ — 132 символа. **В терминале macOS не вводите его в интерактивный запрос, например через утилиту `security`, которая спрашивает пароль сама: терминал обрезает строку до 128 символов, и Garmin отвечает 401.** Вставляйте ключ в поле Gymgar: оно принимает любую длину.
 
+### Тренировки
+
+Когда Garmin подключён, Gymgar сам загружает ваши активности в фоне: при запуске, сразу после подключения и по кнопке **Обновить** на экране «Тренировки». По таймеру, пока окно открыто, в Garmin он не ходит. Окно не замирает во время загрузки, а то, что уже загружено, видно всегда: и без сети, и с ключом, который перестал действовать.
+
+- **Что загружается.** Каждая активность, которую отдаёт Garmin, попадает в список со сводкой: тип, название, дата и время, длительность, дистанция, пульс и калории. У силовых Gymgar скачивает ещё исходный файл, который записали часы, поэтому видны все подходы: упражнение, вес, повторы, пульс и отдых. У остальных активностей только сводка.
+- **Бережно к Garmin.** Лимиты запросов Garmin не публикует, поэтому Gymgar просит что-то одно за раз, делает паузу 2 секунды между файлами, а когда Garmin отвечает «слишком много запросов» или не отвечает, ждёт и повторяет до трёх раз, после чего останавливается. Первая загрузка длинной истории может занять десять минут и больше: на каждую силовую тренировку приходится пауза 2 секунды. Если закрыть окно, следующий запуск продолжит с того же места: загруженное остаётся, и ни один файл тренировки не скачивается дважды.
+- **Новые тренировки.** Тренировка, которая пришла при одной из следующих загрузок и начата позже самой новой из уже загруженных, помечается как новая (точка в списке, число на иконке «Тренировки» и на «Сводке»), пока вы её не откроете. Первая загрузка не помечает ничего.
+- **Правка подходов.** Часы иногда записывают подход неверно: пропущенный подход, лишние повторы, не тот вес, упражнение в конце тренировки, которого не было в программе. Нажмите на подход, чтобы поменять вес и повторы, выбрать другое упражнение (сначала те, что вы делали, затем каталог Garmin; для всей карточки или для одного подхода), не учитывать его или добавить подход, который часы не записали. Поправленное значение показано акцентным цветом, а то, что записали часы, зачёркнуто рядом; **Вернуть как на часах** возвращает его. Подход без повторов, без веса и короче 10 секунд считается пустым и сам не учитывается (его можно вернуть кнопкой «Учитывать»); разминка и кардио учитываются. Тренировку можно и не учитывать целиком.
+- **Правки остаются в Gymgar.** Они хранятся рядом с записью часов, и ни повторная загрузка, ни повторный разбор файла их не трогают. В Garmin они не отправляются, а правки, которые вы раньше сделали в Garmin Connect, не подтягиваются: их не отдаёт API Garmin.
+
+Вес показан в килограммах.
+
 ### Gymgar для ИИ-агента (MCP)
 
 `gymgar-cli mcp` — MCP-сервер по stdio на той же базе, что и приложение. Соберите его и зарегистрируйте, например, в Claude Code:
@@ -112,7 +136,7 @@ cargo build --release -p gymgar-cli
 claude mcp add gymgar -- <путь>/gymgar-cli mcp    # например, <путь> = /путь/к/gymgar/target/release
 ```
 
-Приложение и CLI собирайте в одном профиле (оба release или оба debug), иначе они смотрят в разные каталоги данных. Сервер даёт два инструмента: `command_list` показывает команды, которые агенту можно запускать, вместе с их параметрами, а `command_run` запускает одну из них. Сейчас агент может прочитать статус подключения (`garmin.status`) и настройки (`settings.get`) и сменить язык (`settings.setLanguage`); открытое окно Gymgar переключится за секунду. Агент не может ввести, заменить или удалить ключ, а `gymgar-cli` никогда не открывает связку ключей.
+Приложение и CLI собирайте в одном профиле (оба release или оба debug), иначе они смотрят в разные каталоги данных. Сервер даёт два инструмента: `command_list` показывает команды, которые агенту можно запускать, вместе с их параметрами, а `command_run` запускает одну из них. Сейчас агент может прочитать статус подключения (`garmin.status`) и настройки (`settings.get`), сменить язык (`settings.setLanguage`), получить список активностей и открыть любую с подходами (`activity.list`, `activity.get`), искать упражнения (`exercise.search`) и править подходы (`activity.editSets`, `activity.resetSets`, `activity.addSet`, `activity.removeAddedSet`, `activity.setExcluded`); открытое окно Gymgar подхватит смену языка или правку за секунду. Агент не может ввести, заменить или удалить ключ, запустить загрузку из Garmin и снять пометку «новая» (она для ваших глаз), а `gymgar-cli` никогда не открывает связку ключей и не ходит в Garmin.
 
 ### Лицензия
 

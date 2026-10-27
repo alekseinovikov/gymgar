@@ -2,14 +2,16 @@
 //!
 //! The engine never talks to the keychain, the network or an async runtime itself: `gymgar-secrets`,
 //! `gymgar-garmin` and tokio stay out of its dependency tree, and every command can be tested with fakes
-//! (`testing`). Secrets cross these traits only as [`SecretString`]; the error types carry descriptions only.
+//! (`testing`). Secrets cross these traits only as [`SecretString`]; the error types carry descriptions only. Garmin's
+//! answers cross them as raw bytes: turning those into domain types is `gymgar-sync`'s job, inside the engine's jobs.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use gymgar_domain::SecretBackend;
+use gymgar_domain::{ActivityId, SecretBackend};
 use secrecy::SecretString;
 
 /// A boxed future that can run on any thread: what the engine hands to a [`Spawner`].
@@ -71,13 +73,29 @@ impl SecretStores {
     }
 }
 
-/// Checks a Garmin Personal API key by exchanging it for a token.
+/// Garmin's Personal API: checks keys, and opens a [`GarminSession`] for one.
 pub trait GarminAuth: Send + Sync {
     /// `Ok` when Garmin accepted the key. Runs off the calling thread, on the injected [`Spawner`].
     fn check_key(&self, key: SecretString) -> BoxFuture<Result<(), GarminAuthError>>;
+    /// A session for `key`. Sends nothing yet; fails only for a key no request could carry (`KeyRejected`) or a client
+    /// that cannot be built. Called inside a job: building the client sets up TLS.
+    fn open(&self, key: SecretString) -> Result<Arc<dyn GarminSession>, GarminAuthError>;
 }
 
-/// Why Garmin did not accept a key. Mirrors the cases the user is told about (design spec §2, item 3).
+/// The requests of `garmin.sync`, for one key. It keeps its token in memory, so the engine keeps a session Garmin
+/// accepted for the later syncs of the run instead of reading the key and exchanging it again. Answers are Garmin's
+/// bytes, untouched.
+pub trait GarminSession: Send + Sync {
+    /// Exchanges the key for a new token: `Ok` when Garmin accepted the key.
+    fn verify(&self) -> BoxFuture<Result<(), GarminAuthError>>;
+    /// One page of the activity list (a JSON array), newest first: at most `limit` activities from the `start`-th on.
+    fn activities_page(&self, start: u32, limit: u32) -> BoxFuture<Result<Vec<u8>, GarminAuthError>>;
+    /// The original file of an activity (a ZIP with one `.FIT`); [`GarminAuthError::NotFound`] when Garmin has none.
+    fn activity_file(&self, id: ActivityId) -> BoxFuture<Result<Vec<u8>, GarminAuthError>>;
+}
+
+/// Why a Garmin request failed: why Garmin did not accept a key, or why a request of the sync did not get its answer.
+/// Mirrors the cases the user is told about (design spec §2, item 3; activity import spec §7, «Ошибки загрузки»).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum GarminAuthError {
     /// Garmin refused the key (HTTP 401): wrong, expired or deleted.
@@ -95,6 +113,9 @@ pub enum GarminAuthError {
     /// Garmin answered with something the client does not understand.
     #[error("unexpected answer from Garmin")]
     Unexpected,
+    /// Garmin has nothing at that address (HTTP 404): an activity without a file, such as one entered by hand.
+    #[error("Garmin has no such file")]
+    NotFound,
 }
 
 /// Runs background futures; in the desktop app this is the tokio runtime.
@@ -111,10 +132,14 @@ pub struct Services {
     pub secrets: Option<SecretStores>,
     pub garmin: Option<Arc<dyn GarminAuth>>,
     pub spawner: Option<Arc<dyn Spawner>>,
-    /// Called after a background job finished, so the UI wakes up and polls (`ctx.request_repaint()`).
+    /// Called after a background job sent a partial result or finished, so the UI wakes up and polls
+    /// (`ctx.request_repaint()`).
     pub notify: Arc<dyn Fn() + Send + Sync>,
     /// The current time; injected so tests control expiry dates and warnings.
     pub clock: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    /// Waits the given time inside a background job (the pauses between Garmin requests); injected so tests do not
+    /// wait for real. Only jobs call it, on the [`Spawner`]'s threads.
+    pub sleep: Arc<dyn Fn(Duration) -> BoxFuture<()> + Send + Sync>,
 }
 
 #[cfg(test)]

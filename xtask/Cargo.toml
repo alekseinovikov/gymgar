@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Build tasks: cargo xtask ci | layers"
+description = "Build tasks: cargo xtask ci | layers | scrub-fit | scrub-list"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,4 +11,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+chrono = { workspace = true }
+# scrub-fit rewrites a FIT file through the crate's test writer, so only the messages the app reads survive.
+gymgar-garmin = { workspace = true, features = ["testing"] }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# Reads the scrubbed file back message by message, to prove nothing but the kept messages is in it.
+fitparser = { workspace = true }

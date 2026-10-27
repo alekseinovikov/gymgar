@@ -1,11 +1,19 @@
 //! Garmin Connect commands: `garmin.status`, `garmin.connect`, `garmin.verify` and `garmin.disconnect`.
 //!
 //! `garmin.status` reads the database only: it never opens a secret store or contacts Garmin, so agents and the
-//! CLI can call it freely. Only the key check (`garmin.verify`) sets statuses such as `keyMissing`.
+//! CLI can call it freely. Only a key check (`garmin.verify`, or the one a sync starts with) sets statuses such as
+//! `keyMissing`.
 //!
-//! `garmin.connect` and `garmin.verify` are jobs: the Garmin request runs on the injected spawner, and the result is
-//! applied (key saved, status recorded) by `Session::poll_jobs` through [`apply_connect`] and [`apply_verify`]. One
-//! key check runs at a time; while it does, every command that changes the connection is disabled.
+//! `garmin.connect`, `garmin.verify` and `garmin.disconnect` are jobs: the Garmin request and every call of a secret
+//! store run on the injected spawner, because the system store may hold a call while it asks the user for access, and
+//! that must not freeze the window. Their results are applied (the connection record written or removed, the status
+//! recorded) by `Session::poll_jobs` through [`apply_connect`], [`apply_verify`] and [`apply_disconnect`], on the
+//! session's thread, which touches the database only. What is left to do with a store after that (the key a failed
+//! connect replaced put back, the key of a replaced connection removed from its other store) goes to the spawner as well,
+//! without a job of its own ([`jobs::spawn_tail`]).
+//!
+//! One of these jobs runs at a time; while one does, or while a sync runs, every command that changes the connection is
+//! disabled. A new key drops the Garmin session the last sync kept, and so does any disconnect.
 
 use std::sync::Arc;
 
@@ -17,8 +25,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::commands::{always, done, to_json};
-use crate::jobs::JobOutput;
+use crate::jobs::{self, JobOutput};
 use crate::params::{self, NoParams};
+use crate::sync_cmds::{self, SyncStatusView};
 use crate::{CommandKind, CommandSpec, EngineError, GarminAuth, GarminAuthError, Outcome, SecretStore, SecretStores, Session, Spawner};
 
 const STATUS: &str = "garmin.status";
@@ -26,15 +35,19 @@ const CONNECT: &str = "garmin.connect";
 const VERIFY: &str = "garmin.verify";
 const DISCONNECT: &str = "garmin.disconnect";
 
-/// The jobs that check a key with Garmin. While one runs, connect, verify and disconnect are disabled.
+/// The jobs that check a key with Garmin. While one runs, connect, verify and disconnect are disabled, and so is a sync.
 const KEY_CHECKS: [&str; 2] = [CONNECT, VERIFY];
 
 /// `enabled` reason of commands that need a connection.
-const NOT_CONNECTED: &str = "Garmin Connect is not connected";
+pub(crate) const NOT_CONNECTED: &str = "Garmin Connect is not connected";
 /// `enabled` reason while a key check runs (Review Focus 3: a second click must not start a second check).
 const CHECK_RUNNING: &str = "connection check already running";
+/// `enabled` reason while a disconnect deletes the key.
+const DISCONNECT_RUNNING: &str = "disconnect already running";
 /// `enabled` reason in a session without secret stores (the CLI).
 const NO_SECRET_STORES: &str = "this session has no access to the secret stores";
+/// `enabled` reason in a session without a spawner (the CLI).
+const NO_SPAWNER: &str = "this session cannot run background jobs";
 
 /// The answer of `garmin.status` (and of `garmin.connect`, `garmin.verify` and `garmin.disconnect`): the last known
 /// state of the connection.
@@ -63,6 +76,8 @@ pub struct GarminStatusView {
     pub file_store_location: Option<String>,
     /// A key check (connect or verify) is in flight.
     pub check_running: bool,
+    /// The activity import: whether it runs, how far it got, and how the last one ended.
+    pub sync: SyncStatusView,
 }
 
 /// The params of `garmin.connect`. The key never leaves this struct in readable form: its `Debug` prints a
@@ -92,7 +107,8 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
             id: STATUS,
             description: "Report the last known Garmin Connect status (notConnected, connected, keyRejected, keyMissing or unverified), \
                           when the key expires, when Garmin last accepted it, whether the expiry warning is due and where the key is \
-                          stored. Reads the database only; it never contacts Garmin.",
+                          stored, plus the activity import: whether it runs, files done of files to fetch, when it last succeeded, \
+                          why the last one failed and how many activities are new. Reads the database only; it never contacts Garmin.",
             kind: CommandKind::Query,
             agent: true,
             destructive: false,
@@ -127,9 +143,10 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             id: DISCONNECT,
-            description: "Disconnect Garmin Connect: delete the Personal API key from its secret store and the connection record from \
-                          the database.",
-            kind: CommandKind::Mutation,
+            description: "Disconnect Garmin Connect in the background: delete the Personal API key from its secret store, then the \
+                          connection record from the database. If the key cannot be deleted, the connection stays. Answers with a \
+                          job id; the job's result is the new status.",
+            kind: CommandKind::Job,
             agent: false,
             destructive: true,
             params_schema: params::schema::<NoParams>,
@@ -145,7 +162,7 @@ fn status(session: &mut Session, params: Value) -> Result<Outcome, EngineError> 
 }
 
 /// The connection state as the database records it, judged by the session's clock.
-fn status_view(session: &Session) -> Result<GarminStatusView, EngineError> {
+pub(crate) fn status_view(session: &Session) -> Result<GarminStatusView, EngineError> {
     let connection = session.store().garmin_connection()?;
     let now = session.now();
     let secrets = session.services().secrets.as_ref();
@@ -160,6 +177,7 @@ fn status_view(session: &Session) -> Result<GarminStatusView, EngineError> {
         file_store_needs_consent: secrets.is_some_and(SecretStores::needs_file_consent),
         file_store_location: secrets.and_then(|s| s.file.location()),
         check_running: check_running(session),
+        sync: sync_cmds::sync_status(session)?,
     })
 }
 
@@ -168,34 +186,42 @@ fn check_running(session: &Session) -> bool {
     session.running_jobs().any(|command| KEY_CHECKS.contains(&command))
 }
 
-fn no_check_running(session: &Session) -> Result<(), String> {
-    if check_running(session) { Err(CHECK_RUNNING.to_owned()) } else { Ok(()) }
+/// `Err` with the reason while a job that uses or changes the key runs: a key check, or a disconnect.
+pub(crate) fn no_key_job_running(session: &Session) -> Result<(), String> {
+    if check_running(session) {
+        return Err(CHECK_RUNNING.to_owned());
+    }
+    if session.running_jobs().any(|command| command == DISCONNECT) {
+        return Err(DISCONNECT_RUNNING.to_owned());
+    }
+    Ok(())
 }
 
-/// What a key check needs from the session's services.
-struct CheckServices {
-    secrets: SecretStores,
-    garmin: Arc<dyn GarminAuth>,
-    spawner: Arc<dyn Spawner>,
+/// What a key check (or a sync) needs from the session's services.
+pub(crate) struct CheckServices {
+    pub(crate) secrets: SecretStores,
+    pub(crate) garmin: Arc<dyn GarminAuth>,
+    pub(crate) spawner: Arc<dyn Spawner>,
 }
 
-/// The services a key check needs, or why this session cannot run one.
-fn check_services(session: &Session) -> Result<CheckServices, String> {
+/// The services a key check (or a sync) needs, or why this session cannot run one.
+pub(crate) fn check_services(session: &Session) -> Result<CheckServices, String> {
     let services = session.services();
     Ok(CheckServices {
         secrets: services.secrets.clone().ok_or(NO_SECRET_STORES)?,
         garmin: services.garmin.clone().ok_or("this session cannot reach Garmin")?,
-        spawner: services.spawner.clone().ok_or("this session cannot run background jobs")?,
+        spawner: services.spawner.clone().ok_or(NO_SPAWNER)?,
     })
 }
 
 /// [`check_services`] inside `run`, where `enabled` has already passed.
-fn check_services_for(cmd: &str, session: &Session) -> Result<CheckServices, EngineError> {
+pub(crate) fn check_services_for(cmd: &str, session: &Session) -> Result<CheckServices, EngineError> {
     check_services(session).map_err(|reason| EngineError::Disabled { cmd: cmd.to_owned(), reason })
 }
 
 fn connect_enabled(session: &Session) -> Result<(), String> {
-    no_check_running(session)?;
+    no_key_job_running(session)?;
+    sync_cmds::no_sync_running(session)?;
     check_services(session).map(|_| ())
 }
 
@@ -213,28 +239,51 @@ fn connect(session: &mut Session, params: Value) -> Result<Outcome, EngineError>
         return Err(EngineError::FileStoreConsentRequired);
     }
     let backend = secrets.new_key_backend();
-    let job = session.start_job(CONNECT, &spawner, async move {
-        let result = garmin.check_key(key.clone()).await;
-        JobOutput::ConnectChecked { key, term: key_term, backend, result }
+    let store = secrets.store(backend).cloned().ok_or_else(|| store_unavailable(backend))?;
+    let job = session.start_job(CONNECT, &spawner, move |_| async move {
+        let saved = match garmin.check_key(key.clone()).await {
+            // Saved here, off the session's thread: the system store may wait for the user to allow access.
+            Ok(()) => save_key(store.as_ref(), &key),
+            Err(error) => Err(error.into()),
+        };
+        JobOutput::ConnectChecked { term: key_term, backend, saved }
     });
     Ok(Outcome::Started(job))
 }
 
-/// Applies a finished `garmin.connect`: if Garmin accepted the key, saves it and the connection record. Either both
-/// are saved or neither is: a key whose record cannot be saved is replaced by the key it replaced. A key the replaced
-/// connection kept in another store is then removed from there.
+/// The error of a command that needs `backend`'s store when this session has none.
+fn store_unavailable(backend: SecretBackend) -> EngineError {
+    EngineError::Secrets(format!("the {} secret store is unavailable", backend.as_str()))
+}
+
+/// Saves `key`, which Garmin has accepted, to `store`, and returns the key it replaced there, to put back should the
+/// connection record not be saved. Runs inside the job of `garmin.connect`.
+fn save_key(store: &dyn SecretStore, key: &SecretString) -> Result<Option<SecretString>, EngineError> {
+    let previous = match store.get() {
+        Ok(previous) => previous,
+        Err(error) => {
+            // A key that cannot be read is no key at all: connecting is how the user replaces it.
+            log::warn!("cannot read the key being replaced in the {} secret store: {error}", store.backend().as_str());
+            None
+        }
+    };
+    store.set(key)?;
+    Ok(previous)
+}
+
+/// Applies a finished `garmin.connect`. `saved` is what the job did: the key Garmin accepted is in `backend`'s store, and
+/// it replaced the key inside `Ok` there; or why there is nothing to apply (Garmin refused the key, the store failed).
+/// Writes the connection record. Either the key and its record are both saved or neither is: when the record cannot be
+/// saved, the replaced key is put back. A key the replaced connection kept in another store is then removed from there,
+/// and the Garmin session the last sync kept, which holds the old key's token, is dropped. Every call of a secret store
+/// here goes to the spawner ([`jobs::spawn_tail`]), so this thread only touches the database.
 pub(crate) fn apply_connect(
-    session: &Session,
-    key: &SecretString,
+    session: &mut Session,
     term: KeyTerm,
     backend: SecretBackend,
-    result: Result<(), GarminAuthError>,
+    saved: Result<Option<SecretString>, EngineError>,
 ) -> Result<Value, EngineError> {
-    result?;
-    let secrets = session.services().secrets.as_ref();
-    let store = secrets
-        .and_then(|secrets| secrets.store(backend))
-        .ok_or_else(|| EngineError::Secrets(format!("the {} secret store is unavailable", backend.as_str())))?;
+    let previous = saved?;
     // Read before the new record overwrites it: where the key of the connection being replaced lives.
     let replaced_backend = match session.store().garmin_connection() {
         Ok(connection) => connection.map(|connection| connection.secret_backend),
@@ -243,15 +292,6 @@ pub(crate) fn apply_connect(
             None
         }
     };
-    let previous = match store.get() {
-        Ok(previous) => previous,
-        Err(error) => {
-            // A key that cannot be read is no key at all: connecting is how the user replaces it.
-            log::warn!("cannot read the key being replaced in the {} secret store: {error}", backend.as_str());
-            None
-        }
-    };
-    store.set(key)?;
     let now = session.now();
     let connection = GarminConnection {
         connected_at: now,
@@ -262,44 +302,58 @@ pub(crate) fn apply_connect(
         secret_backend: backend,
     };
     if let Err(error) = session.store().save_garmin_connection(&connection) {
-        restore_key(store.as_ref(), previous);
+        restore_key(session, backend, previous);
         return Err(error.into());
     }
     log::info!("Garmin Connect connected for {} days; the key is kept in the {} secret store", term.days(), backend.as_str());
     if let Some(replaced) = replaced_backend.filter(|replaced| *replaced != backend) {
-        delete_replaced_key(secrets, replaced);
+        delete_replaced_key(session, replaced);
     }
+    session.set_garmin_session(None);
     to_json(CONNECT, &status_view(session)?)
 }
 
-/// Removes the key of a replaced connection from `backend`, the store it was kept in, now that the new key lives in
-/// another one. Only the recorded store is ever read or cleared again, so the old key would otherwise stay there for
-/// good. Best effort: the new connection is saved already, so a failure is only logged.
-fn delete_replaced_key(secrets: Option<&SecretStores>, backend: SecretBackend) {
-    let Some(store) = secrets.and_then(|secrets| secrets.store(backend)) else {
+/// The store of `backend` in this session, if it has one.
+fn secret_store(session: &Session, backend: SecretBackend) -> Option<Arc<dyn SecretStore>> {
+    session.services().secrets.as_ref().and_then(|secrets| secrets.store(backend)).cloned()
+}
+
+/// Removes, in the background, the key of a replaced connection from `backend`, the store it was kept in, now that the
+/// new key lives in another one. Only the recorded store is ever read or cleared again, so the old key would otherwise
+/// stay there for good. Best effort: the new connection is saved already, so a failure is only logged.
+fn delete_replaced_key(session: &Session, backend: SecretBackend) {
+    let Some(store) = secret_store(session, backend) else {
         log::warn!("the {} secret store, which holds the replaced Garmin key, is unavailable; the key stays there", backend.as_str());
         return;
     };
-    match store.delete() {
+    jobs::spawn_tail(session.services().spawner.as_ref(), "deleting the replaced Garmin key", move || match store.delete() {
         Ok(()) => log::info!("deleted the replaced Garmin key from the {} secret store", backend.as_str()),
         Err(error) => log::warn!("cannot delete the replaced Garmin key from the {} secret store: {error}", backend.as_str()),
-    }
+    });
 }
 
-/// Puts back the key a failed connect replaced, or removes the new one when there was none. The connect has already
-/// failed and reports why, so a failure here can only be logged.
-fn restore_key(store: &dyn SecretStore, previous: Option<SecretString>) {
-    let restored = match previous {
-        Some(key) => store.set(&key),
-        None => store.delete(),
+/// Puts back, in the background, the key a failed connect replaced in `backend`'s store, or removes the new one when
+/// there was none. The connect has already failed and reports why, so a failure here can only be logged.
+fn restore_key(session: &Session, backend: SecretBackend, previous: Option<SecretString>) {
+    let Some(store) = secret_store(session, backend) else {
+        // The job saved the key there, and a session's stores do not change, so this does not happen.
+        log::error!("cannot restore the {} secret store after a failed connect: the store is unavailable", backend.as_str());
+        return;
     };
-    if let Err(error) = restored {
-        log::error!("cannot restore the {} secret store after a failed connect: {error}", store.backend().as_str());
-    }
+    jobs::spawn_tail(session.services().spawner.as_ref(), "restoring the Garmin key after a failed connect", move || {
+        let restored = match previous {
+            Some(key) => store.set(&key),
+            None => store.delete(),
+        };
+        if let Err(error) = restored {
+            log::error!("cannot restore the {} secret store after a failed connect: {error}", backend.as_str());
+        }
+    });
 }
 
 fn verify_enabled(session: &Session) -> Result<(), String> {
-    no_check_running(session)?;
+    no_key_job_running(session)?;
+    sync_cmds::no_sync_running(session)?;
     check_services(session)?;
     // A database failure does not grey the command out: `run` reports it as the store error it is.
     let Ok(connection) = session.store().garmin_connection() else { return Ok(()) };
@@ -313,7 +367,7 @@ fn verify(session: &mut Session, params: Value) -> Result<Outcome, EngineError> 
     // The key is read from the store it was saved to, never from where a new key would go now. That store may be
     // missing in this session (the store changed): then the key is missing too.
     let store = secrets.store(connection.secret_backend).cloned();
-    let job = session.start_job(VERIFY, &spawner, async move {
+    let job = session.start_job(VERIFY, &spawner, move |_| async move {
         // Read inside the job, off the session's thread: the system store may wait for the user to allow access.
         let result = match read_key(store) {
             Ok(key) => garmin.check_key(key).await.map_err(EngineError::from),
@@ -325,15 +379,23 @@ fn verify(session: &mut Session, params: Value) -> Result<Outcome, EngineError> 
 }
 
 /// The key in `store`; `KeyMissing` when there is no store or no key in it.
-fn read_key(store: Option<Arc<dyn SecretStore>>) -> Result<SecretString, EngineError> {
+pub(crate) fn read_key(store: Option<Arc<dyn SecretStore>>) -> Result<SecretString, EngineError> {
     store.ok_or(EngineError::KeyMissing)?.get()?.ok_or(EngineError::KeyMissing)
 }
 
 /// Applies a finished `garmin.verify`: records what the check found out, then answers with the new status, or with
 /// the reason the key did not pass.
 pub(crate) fn apply_verify(session: &Session, result: Result<(), EngineError>) -> Result<Value, EngineError> {
+    record_verify(session, &result)?;
+    result?;
+    to_json(VERIFY, &status_view(session)?)
+}
+
+/// Records what a key check found out (that of `garmin.verify`, or the one a sync starts with) as the connection's
+/// status. Fails only when the record cannot be read or written, or there is none.
+pub(crate) fn record_verify(session: &Session, result: &Result<(), EngineError>) -> Result<(), EngineError> {
     let mut connection = session.store().garmin_connection()?.ok_or(EngineError::NotConnected)?;
-    connection.last_status = match &result {
+    connection.last_status = match result {
         Ok(()) => ConnectionStatus::Connected,
         Err(EngineError::Garmin(GarminAuthError::KeyRejected)) => ConnectionStatus::KeyRejected,
         // The key is not where it was saved, or that store cannot be read (a locked keychain): design spec §2, item 7.
@@ -351,8 +413,7 @@ pub(crate) fn apply_verify(session: &Session, result: Result<(), EngineError>) -
     // The key is never deleted here, whatever the check found (design spec §2, item 6).
     session.store().save_garmin_connection(&connection)?;
     log::info!("Garmin key check finished: {}", connection.last_status.as_str());
-    result?;
-    to_json(VERIFY, &status_view(session)?)
+    Ok(())
 }
 
 /// The secret store holding the key of a connection recorded with `backend`, or why it cannot be reached.
@@ -362,22 +423,38 @@ fn key_store(session: &Session, backend: SecretBackend) -> Result<&Arc<dyn Secre
 }
 
 fn disconnect_enabled(session: &Session) -> Result<(), String> {
-    no_check_running(session)?;
+    no_key_job_running(session)?;
+    sync_cmds::no_sync_running(session)?;
     // A database failure does not grey the command out: `run` reports it as the store error it is.
     let Ok(connection) = session.store().garmin_connection() else { return Ok(()) };
     let connection = connection.ok_or(NOT_CONNECTED)?;
-    key_store(session, connection.secret_backend).map(|_| ())
+    key_store(session, connection.secret_backend)?;
+    session.services().spawner.as_ref().map(|_| ()).ok_or_else(|| NO_SPAWNER.to_owned())
 }
 
 fn disconnect(session: &mut Session, params: Value) -> Result<Outcome, EngineError> {
     params::parse::<NoParams>(DISCONNECT, params)?;
     let connection = session.store().garmin_connection()?.ok_or(EngineError::NotConnected)?;
-    // The key goes first. If deleting it fails, the connection stays and the user can try again; the other way
-    // round, a failure would leave a key behind that no command can reach any more.
-    key_store(session, connection.secret_backend).map_err(EngineError::Secrets)?.delete()?;
+    let backend = connection.secret_backend;
+    let store = key_store(session, backend).map_err(EngineError::Secrets)?.clone();
+    let spawner = session.services().spawner.clone().ok_or_else(|| EngineError::Disabled { cmd: DISCONNECT.to_owned(), reason: NO_SPAWNER.to_owned() })?;
+    // Once the user has asked to disconnect, the token of the key is not used again, however the disconnect ends.
+    session.set_garmin_session(None);
+    // The key goes first, in the job: the system store may wait for the user to allow access. If deleting it fails, the
+    // connection stays and the user can try again; the other way round, a failure would leave a key behind that no
+    // command can reach any more.
+    let job =
+        session.start_job(DISCONNECT, &spawner, move |_| async move { JobOutput::KeyDeleted { backend, result: store.delete().map_err(EngineError::from) } });
+    Ok(Outcome::Started(job))
+}
+
+/// Applies a finished `garmin.disconnect`: the key is gone from `backend`'s store, so the connection record goes too.
+/// When the key could not be deleted, the record stays, and the answer says why.
+pub(crate) fn apply_disconnect(session: &Session, backend: SecretBackend, result: Result<(), EngineError>) -> Result<Value, EngineError> {
+    result?;
     session.store().delete_garmin_connection()?;
-    log::info!("Garmin Connect disconnected; the key was deleted from the {} secret store", connection.secret_backend.as_str());
-    done(DISCONNECT, &status_view(session)?)
+    log::info!("Garmin Connect disconnected; the key was deleted from the {} secret store", backend.as_str());
+    to_json(DISCONNECT, &status_view(session)?)
 }
 
 #[cfg(test)]

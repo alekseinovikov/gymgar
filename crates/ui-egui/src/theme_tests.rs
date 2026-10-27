@@ -21,6 +21,8 @@ fn sport_tokens_match_the_spec_table() {
     assert_eq!(t.accent_text, hex(0x0d0f0e));
     assert_eq!(t.accent_soft, hex(0x2a3410));
     assert_eq!(t.warning, hex(0xff7a45));
+    // Not in the table: the line being edited in `workouts-edit.html`.
+    assert_eq!(t.edit_row, hex(0x1d231e));
     assert_eq!(t.radius_card, 12.0);
     // The table says "8-9 px" for buttons and fields.
     assert!((8.0..=9.0).contains(&t.radius_control), "{}", t.radius_control);

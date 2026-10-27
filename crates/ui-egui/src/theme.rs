@@ -31,6 +31,9 @@ pub struct Tokens {
     pub accent_soft: Color32,
     /// Errors and warnings.
     pub warning: Color32,
+    /// The backing of the line of a set being edited and of its buttons, and of a line under the pointer that a click
+    /// opens for editing (the approved mock-up `workouts-edit.html`).
+    pub edit_row: Color32,
     /// Corner radius of cards, in points.
     pub radius_card: f32,
     /// Corner radius of buttons and fields, in points (the mock-up has 8 to 9).
@@ -50,6 +53,7 @@ impl Tokens {
         accent_text: Color32::from_rgb(0x0d, 0x0f, 0x0e),
         accent_soft: Color32::from_rgb(0x2a, 0x34, 0x10),
         warning: Color32::from_rgb(0xff, 0x7a, 0x45),
+        edit_row: Color32::from_rgb(0x1d, 0x23, 0x1e),
         radius_card: 12.0,
         radius_control: 8.0,
     };
@@ -90,12 +94,66 @@ pub mod metrics {
     pub const INVITATION_WIDTH: f32 = 460.0;
     /// Width of a text field in a form.
     pub const FIELD_WIDTH: f32 = 420.0;
+    /// Space between the border of a search field and its text.
+    pub const FIELD_PADDING_X: i8 = 10;
+    pub const FIELD_PADDING_Y: i8 = 6;
     /// Diameter of the spinner shown while Garmin is asked.
     pub const SPINNER_SIZE: f32 = 20.0;
     /// Size of the title of a screen.
     pub const PAGE_TITLE_SIZE: f32 = 24.0;
-    /// Size of the title of a card.
+    /// Size of the title of a card, and of the title of the activity list.
     pub const CARD_TITLE_SIZE: f32 = 17.0;
+    /// Size of secondary lines in a dense list: the date line of an activity, a chip.
+    pub const SMALL_TEXT_SIZE: f32 = 11.5;
+    /// The number of new activities on a rail icon: its height and the size of its digits.
+    pub const BADGE_HEIGHT: f32 = 15.0;
+    pub const BADGE_TEXT_SIZE: f32 = 10.0;
+    /// Width of the activity list beside the selected activity (the approved mock-up, variant A).
+    pub const LIST_WIDTH: f32 = 270.0;
+    /// Space between the edges of the activity list and its header.
+    pub const LIST_PADDING: i8 = 12;
+    /// Height of one activity in the list: two lines and the space around them.
+    pub const LIST_ROW_HEIGHT: f32 = 52.0;
+    /// Height of the heading of a week in the list.
+    pub const WEEK_HEADING_HEIGHT: f32 = 28.0;
+    /// Space between the edge of a list row and its text.
+    pub const ROW_PADDING: f32 = 8.0;
+    /// Diameter of the dot that marks an activity the user has not opened yet.
+    pub const NEW_DOT: f32 = 7.0;
+    /// Height of a filter chip, and the space between its border and its text.
+    pub const CHIP_HEIGHT: f32 = 24.0;
+    pub const CHIP_PADDING: f32 = 10.0;
+    /// Space between the numbers in the header of the open activity, and the size of each number.
+    pub const STAT_GAP: f32 = 18.0;
+    pub const STAT_VALUE_SIZE: f32 = 15.0;
+    /// Height of a line of a table of sets.
+    pub const SET_ROW_HEIGHT: f32 = 24.0;
+    /// The columns of a table of sets, as shares of its width: the number, weight, reps, the plan (only in a card whose
+    /// sets were asked for different things), heart rate, time and rest.
+    pub const SET_COLUMNS: [f32; 7] = [0.06, 0.2, 0.14, 0.16, 0.12, 0.14, 0.16];
+    /// Space between the edge of a table cell and its text.
+    pub const CELL_PADDING: f32 = 6.0;
+    /// Height of the line of a set being edited: a little taller than the others, for its fields.
+    pub const EDIT_ROW_HEIGHT: f32 = 30.0;
+    /// A field for a number in a line of a table: its width, the space between its border and its text, and the most
+    /// characters it takes (more than any weight or count needs).
+    pub const NUMBER_FIELD_WIDTH: f32 = 56.0;
+    pub const NUMBER_FIELD_PADDING_X: i8 = 6;
+    pub const NUMBER_FIELD_PADDING_Y: i8 = 2;
+    pub const NUMBER_FIELD_MAX_CHARS: usize = 10;
+    /// Height of a small button (the actions under a line being edited), and the space around its text.
+    pub const SMALL_CONTROL_HEIGHT: f32 = 26.0;
+    pub const SMALL_BUTTON_PADDING_X: f32 = 10.0;
+    pub const SMALL_BUTTON_PADDING_Y: f32 = 4.0;
+    /// The exercise picker: its width, how far under the top of the open activity it opens (below the button of the
+    /// header), the space inside it, and the most its list of exercises takes before it scrolls.
+    pub const POPOVER_WIDTH: f32 = 330.0;
+    pub const POPOVER_TOP: f32 = CONTROL_HEIGHT + 2.0 * GAP;
+    pub const POPOVER_PADDING: i8 = 10;
+    pub const POPOVER_LIST_HEIGHT: f32 = 220.0;
+    /// Height of an option in a list to choose from, and the space between its edge and its text.
+    pub const OPTION_HEIGHT: f32 = 26.0;
+    pub const OPTION_PADDING: f32 = 8.0;
 }
 
 fn tokens_id() -> Id {

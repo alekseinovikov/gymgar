@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use gymgar_automation::AutomationError;
-use gymgar_engine::{Services, Session};
+use gymgar_engine::{BoxFuture, Services, Session};
 use gymgar_store::{Store, StoreError, paths};
 
 const USAGE: &str = "\
@@ -76,9 +76,17 @@ enum CliError {
     Mcp(#[from] AutomationError),
 }
 
-/// What the CLI gives the engine: nothing that reaches outside the database.
+/// What the CLI gives the engine: nothing that reaches outside the database. Without a spawner no job ever runs, so
+/// the sleep, which only jobs use, need not wait at all.
 fn headless_services() -> Services {
-    Services { secrets: None, garmin: None, spawner: None, notify: Arc::new(|| {}), clock: Arc::new(chrono::Utc::now) }
+    Services {
+        secrets: None,
+        garmin: None,
+        spawner: None,
+        notify: Arc::new(|| {}),
+        clock: Arc::new(chrono::Utc::now),
+        sleep: Arc::new(|_| -> BoxFuture<()> { Box::pin(std::future::ready(())) }),
+    }
 }
 
 fn run_mcp() -> Result<(), CliError> {
@@ -157,5 +165,13 @@ mod tests {
         // No secret stores, no Garmin, no spawner: even the user-level connect command is unavailable.
         let connect = session.execute("garmin.connect", json!({ "apiKey": "k", "keyTerm": 365 }), Caller::User);
         assert!(matches!(connect, Err(EngineError::Disabled { .. })), "{connect:?}");
+    }
+
+    #[test]
+    fn the_headless_sleep_does_not_wait() {
+        // No job runs in the CLI; should one ever sleep, it must not hold the process for real.
+        let mut wait = (headless_services().sleep)(std::time::Duration::from_secs(3600));
+        let ready = wait.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop()));
+        assert!(ready.is_ready());
     }
 }
