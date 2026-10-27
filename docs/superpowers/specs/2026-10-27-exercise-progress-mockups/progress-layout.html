@@ -1,0 +1,149 @@
+<style>
+  .w { --bg:#0d0f0e; --chrome:#121513; --card:#171b18; --field:#0f1210; --border:#262c27; --text:#eef2ec; --dim:#8a958c; --accent:#c4f135; --soft:#2a3410; --warn:#ff7a45; }
+  .w-win { background:var(--bg); color:var(--text); border-radius:10px; overflow:hidden; font:13px/1.45 -apple-system,"Segoe UI",Inter,sans-serif; display:flex; flex-direction:column; border:1px solid var(--border); text-align:left; }
+  .w-title { height:26px; background:var(--chrome); display:flex; align-items:center; padding:0 10px; gap:6px; color:var(--dim); font-size:12px; flex-shrink:0; }
+  .w-dot { width:9px; height:9px; border-radius:50%; background:var(--border); display:inline-block; }
+  .w-body { flex:1; display:flex; min-height:0; }
+  .w-rail { width:50px; background:var(--chrome); border-right:1px solid var(--border); padding:10px 0; display:flex; flex-direction:column; align-items:center; gap:7px; flex-shrink:0; }
+  .w-ic { width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; opacity:.75; }
+  .w-ic.on { background:var(--soft); opacity:1; box-shadow:inset 0 0 0 1px var(--accent); }
+  .w-sp { flex:1; }
+  .w-list { width:270px; border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; }
+  .w-lhead { padding:12px 12px 8px; display:flex; flex-direction:column; gap:8px; }
+  .w-h { font-size:16px; font-weight:650; }
+  .w-sub { color:var(--dim); font-size:12px; }
+  .w-chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .w-chip { border:1px solid var(--border); border-radius:12px; padding:1px 9px; font-size:12px; color:var(--dim); }
+  .w-chip.on { border-color:var(--accent); color:var(--accent); }
+  .w-items { padding:0 6px 8px; }
+  .w-item { padding:7px 8px; border-radius:8px; display:flex; gap:8px; align-items:center; }
+  .w-item.sel { background:var(--card); box-shadow:inset 0 0 0 1px var(--border); }
+  .w-it { flex:1; min-width:0; }
+  .w-it b { font-weight:600; }
+  .w-st { font-size:11.5px; border-radius:10px; padding:1px 8px; white-space:nowrap; }
+  .w-st.up { background:var(--soft); color:var(--accent); font-weight:650; }
+  .w-st.hold { color:var(--dim); border:1px solid var(--border); }
+  .w-st.brk { color:var(--warn); border:1px solid #4a2a1c; }
+  .w-detail { flex:1; padding:14px 18px; display:flex; flex-direction:column; gap:10px; min-width:0; }
+  .w-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 12px; }
+  .w-rec { border-color:var(--accent); }
+  .w-rec b.big { font-size:17px; color:var(--accent); }
+  table.w-sets { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .w-sets th { color:var(--dim); font-weight:500; text-align:left; padding:2px 6px; border-bottom:1px solid var(--border); }
+  .w-sets td { padding:3px 6px; border-bottom:1px solid #1d221e; }
+  .w-sets tr:last-child td { border-bottom:none; }
+  .w-full { flex:1; padding:14px 18px; display:flex; flex-direction:column; gap:10px; min-width:0; }
+  .w-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+  .w-tile { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:9px 11px; display:flex; flex-direction:column; gap:3px; }
+  .w-tile.up { border-color:var(--accent); }
+  .w-tile b { font-weight:620; font-size:12.5px; }
+  .w-num { font-size:15px; font-weight:700; }
+  .w-btn { display:inline-block; background:var(--accent); color:#0d0f0e; font-weight:650; border-radius:9px; padding:3px 11px; font-size:12px; }
+  .w-step { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-secondary); margin:1.4rem 0 .5rem; }
+  svg text { font:10.5px -apple-system,"Segoe UI",Inter,sans-serif; }
+</style>
+
+<h2>Экран «Прогресс»: какой вариант ближе?</h2>
+<p class="subtitle">Данные выдуманные, похожие на настоящие. Салатовое — «можно добавлять», серое — «держим», оранжевое — «перерыв». Можно кликнуть вариант, подробности написать в чат.</p>
+
+<div class="options">
+
+<div class="option" data-choice="a" onclick="toggleSelect(this)">
+<div class="letter">A</div>
+<div class="content">
+<h3>Список упражнений слева, упражнение справа</h3>
+<p>Как «Тренировки». Слева все упражнения со статусом подсказки, справа выбранное: подсказка, график по месяцам, последние занятия.</p>
+
+<div class="w" style="margin-top:10px"><div class="w-win">
+  <div class="w-title"><span class="w-dot"></span><span class="w-dot"></span><span class="w-dot"></span>&nbsp; Gymgar</div>
+  <div class="w-body">
+    <div class="w-rail"><div class="w-ic">🏠</div><div class="w-ic">🏋️</div><div class="w-ic on">📈</div><div class="w-sp"></div><div class="w-ic">⚙️</div></div>
+    <div class="w-list">
+      <div class="w-lhead">
+        <span class="w-h">Прогресс</span>
+        <div class="w-chips"><span class="w-chip on">Все</span><span class="w-chip">Можно добавлять · 3</span><span class="w-chip">Перерыв · 1</span></div>
+      </div>
+      <div class="w-items">
+        <div class="w-item sel"><div class="w-it"><b>Румынская становая тяга</b><div class="w-sub">75 кг × 10 · 16 авг</div></div><span class="w-st up">↑ 80 кг</span></div>
+        <div class="w-item"><div class="w-it"><b>Жим гантелей над головой</b><div class="w-sub">48 кг × 10 · 21 авг</div></div><span class="w-st up">↑ 52 кг</span></div>
+        <div class="w-item"><div class="w-it"><b>Приседание со штангой</b><div class="w-sub">90 кг × 10 · 13 авг</div></div><span class="w-st up">↑ 95 кг</span></div>
+        <div class="w-item"><div class="w-it"><b>Жим штанги лёжа</b><div class="w-sub">95 кг × 8 из 10 · 13 авг</div></div><span class="w-st hold">держим</span></div>
+        <div class="w-item"><div class="w-it"><b>Тяга штанги в наклоне</b><div class="w-sub">65 кг × 10 · 1 из 2 · 13 авг</div></div><span class="w-st hold">держим</span></div>
+        <div class="w-item"><div class="w-it"><b>Тяга на низком блоке</b><div class="w-sub">65 кг × 10 из 12 · 21 авг</div></div><span class="w-st hold">держим</span></div>
+        <div class="w-item"><div class="w-it"><b>Тяга верхнего блока к груди</b><div class="w-sub">70 кг × 10 · 12 июн</div></div><span class="w-st brk">перерыв</span></div>
+      </div>
+    </div>
+    <div class="w-detail">
+      <div><div class="w-h">Румынская становая тяга</div><div class="w-sub">6 занятий с мая · цель по программе «Ноги Б» — 10 повторов</div></div>
+      <div class="w-card w-rec">
+        <b class="big">Можно добавлять: 80 кг</b>
+        <div class="w-sub" style="margin-top:2px">75 кг × 10 два занятия подряд — 31 июля и 16 августа. С 80 кг ждите около 8 повторов, дальше снова до 10.</div>
+      </div>
+      <div class="w-card">
+        <div class="w-sub">Вес на 10 повторов, лучший за месяц</div>
+        <svg viewBox="0 0 340 160" width="100%">
+          <g stroke="#262c27" stroke-width="1"><line x1="34" y1="14" x2="334" y2="14"/><line x1="34" y1="40" x2="334" y2="40"/><line x1="34" y1="67" x2="334" y2="67"/><line x1="34" y1="93" x2="334" y2="93"/><line x1="34" y1="120" x2="334" y2="120"/><line x1="34" y1="146" x2="334" y2="146"/></g>
+          <g fill="#8a958c" text-anchor="end"><text x="30" y="17">85</text><text x="30" y="43">75</text><text x="30" y="70">65</text><text x="30" y="96">55</text><text x="30" y="123">45</text><text x="30" y="149">35</text></g>
+          <g fill="#8a958c" text-anchor="middle"><text x="70" y="158">май</text><text x="150" y="158">июн</text><text x="230" y="158">июл</text><text x="310" y="158">авг</text></g>
+          <polyline points="70,133 150,40 230,67 310,40" fill="none" stroke="#c4f135" stroke-width="2.2"/>
+          <g fill="#c4f135"><circle cx="70" cy="133" r="4"/><circle cx="150" cy="40" r="4"/><circle cx="230" cy="67" r="4"/><circle cx="310" cy="40" r="4"/></g>
+          <g fill="#eef2ec" text-anchor="middle"><text x="70" y="124">40</text><text x="150" y="31">75</text><text x="230" y="84">65</text><text x="310" y="31">75</text></g>
+        </svg>
+      </div>
+      <div class="w-card">
+        <table class="w-sets"><tr><th>Дата</th><th>Программа</th><th>Рабочий подход</th><th>Все подходы</th></tr>
+          <tr><td>16 авг</td><td>Ноги Б</td><td><b>75 × 10</b></td><td class="w-sub">20 · 40 · 60 · 75 × 10</td></tr>
+          <tr><td>31 июл</td><td>Ноги Б</td><td><b>75 × 10</b></td><td class="w-sub">20 · 40 · 60 · 75 × 10</td></tr>
+          <tr><td>17 июл</td><td>Ноги Б</td><td>65 × 10</td><td class="w-sub">20 · 40 · 55 · 65 × 10</td></tr>
+          <tr><td>25 июн</td><td>Ноги Б</td><td>75 × 10</td><td class="w-sub">20 · 40 · 60 · 75 × 10</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div></div>
+</div>
+</div>
+
+<div class="option" data-choice="b" onclick="toggleSelect(this)">
+<div class="letter">B</div>
+<div class="content">
+<h3>Все упражнения плитками с маленьким графиком</h3>
+<p>Сразу видно картину по всем упражнениям. Клик по плитке открывает упражнение целиком — то же, что справа в A.</p>
+
+<div class="w" style="margin-top:10px"><div class="w-win">
+  <div class="w-title"><span class="w-dot"></span><span class="w-dot"></span><span class="w-dot"></span>&nbsp; Gymgar</div>
+  <div class="w-body">
+    <div class="w-rail"><div class="w-ic">🏠</div><div class="w-ic">🏋️</div><div class="w-ic on">📈</div><div class="w-sp"></div><div class="w-ic">⚙️</div></div>
+    <div class="w-full">
+      <span class="w-h">Прогресс</span>
+      <div class="w-chips"><span class="w-chip on">Все</span><span class="w-chip">Можно добавлять · 3</span><span class="w-chip">Перерыв · 1</span></div>
+      <div class="w-grid">
+        <div class="w-tile up"><b>Румынская становая тяга</b><span class="w-num">70 кг × 10</span><svg viewBox="0 0 120 28" width="100%" height="28"><polyline points="2,26 24,9 46,3 68,9 90,3 118,3" fill="none" stroke="#c4f135" stroke-width="1.8"/></svg><span class="w-st up" style="align-self:flex-start">↑ можно 80 кг</span></div>
+        <div class="w-tile up"><b>Жим гантелей над головой</b><span class="w-num">48 кг × 10</span><svg viewBox="0 0 120 28" width="100%" height="28"><polyline points="2,12 24,12 46,4 68,20 90,12 118,12" fill="none" stroke="#c4f135" stroke-width="1.8"/></svg><span class="w-st up" style="align-self:flex-start">↑ можно 52 кг</span></div>
+        <div class="w-tile up"><b>Приседание со штангой</b><span class="w-num">90 кг × 10</span><svg viewBox="0 0 120 28" width="100%" height="28"><polyline points="2,8 22,8 42,3 62,8 82,26 100,26 118,26" fill="none" stroke="#c4f135" stroke-width="1.8"/></svg><span class="w-st up" style="align-self:flex-start">↑ можно 95 кг</span></div>
+        <div class="w-tile"><b>Жим штанги лёжа</b><span class="w-num">95 кг × 8</span><svg viewBox="0 0 120 28" width="100%" height="28"><polyline points="2,8 22,8 42,3 62,8 82,16 100,26 118,8" fill="none" stroke="#8a958c" stroke-width="1.8"/></svg><span class="w-sub">держим · 8 из 10</span></div>
+        <div class="w-tile"><b>Тяга штанги в наклоне</b><span class="w-num">65 кг × 10</span><svg viewBox="0 0 120 28" width="100%" height="28"><polyline points="2,4 22,12 42,12 62,4 82,4 100,26 118,12" fill="none" stroke="#8a958c" stroke-width="1.8"/></svg><span class="w-sub">держим · 1 из 2</span></div>
+        <div class="w-tile"><b>Тяга верхнего блока к груди</b><span class="w-num">70 кг × 10</span><svg viewBox="0 0 120 28" width="100%" height="28"><polyline points="2,16 40,10 78,6" fill="none" stroke="#8a958c" stroke-width="1.8"/><line x1="78" y1="6" x2="118" y2="6" stroke="#ff7a45" stroke-dasharray="3 3"/></svg><span class="w-sub" style="color:#ff7a45">перерыв 10 недель</span></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+</div>
+</div>
+
+</div>
+
+<div class="w-step">Можно добавить в любом варианте</div>
+<div class="w" style="display:flex;gap:12px;flex-wrap:wrap">
+  <div class="w-card" style="flex:1;min-width:260px;background:#171b18;color:#eef2ec;text-align:left">
+    <div class="w-sub">«Сводка», после новой тренировки</div>
+    <b style="font-size:14px">Можно добавлять: 2 упражнения</b>
+    <div style="font-size:12.5px;margin:4px 0 8px">Румынская становая 75 → 80 кг<br>Жим гантелей над головой 48 → 52 кг</div>
+    <span class="w-btn">Открыть прогресс</span>
+  </div>
+  <div class="w-card" style="flex:1;min-width:260px;background:#171b18;color:#eef2ec;text-align:left">
+    <div class="w-sub">«Тренировки», карточка упражнения в открытой тренировке</div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><b>Румынская становая тяга</b><span class="w-sub">план 4 × 10 · 65 кг</span></div>
+    <div style="font-size:12.5px;margin-top:4px;color:#c4f135">↑ Можно добавлять: 80 кг · открыть прогресс</div>
+  </div>
+</div>

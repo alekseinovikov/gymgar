@@ -1,0 +1,92 @@
+<style>
+  .w { --bg:#0d0f0e; --chrome:#121513; --card:#171b18; --field:#0f1210; --border:#262c27; --text:#eef2ec; --dim:#8a958c; --accent:#c4f135; --soft:#2a3410; --warn:#ff7a45; }
+  .w-pane { background:var(--bg); color:var(--text); border-radius:10px; border:1px solid var(--border); padding:14px 16px; font:13px/1.45 -apple-system,"Segoe UI",Inter,sans-serif; text-align:left; }
+  .w-h { font-size:16px; font-weight:650; }
+  .w-sub { color:var(--dim); font-size:12px; }
+  .w-big { font-size:22px; font-weight:700; color:var(--accent); }
+  .w-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-top:10px; }
+  .w-legend { display:flex; gap:14px; font-size:11.5px; color:var(--dim); margin-top:4px; flex-wrap:wrap; }
+  .w-sw { display:inline-block; width:10px; height:10px; border-radius:50%; vertical-align:-1px; margin-right:4px; }
+  svg text { font:10.5px -apple-system,"Segoe UI",Inter,sans-serif; }
+</style>
+
+<h2>Жим штанги лёжа: какой график понятнее?</h2>
+<p class="subtitle">Данные выдуманные, похожие на настоящие: май–октябрь, в сентябре перерыв. Цель по программе — 10 повторов. Точка — лучшее за месяц. Можно кликнуть вариант, подробности написать в чат.</p>
+
+<div class="options">
+
+<div class="option" data-choice="a" onclick="toggleSelect(this)">
+<div class="letter">A</div>
+<div class="content">
+<h3>Вес на 10 повторов</h3>
+<p>Линия — самый тяжёлый подход месяца, где вы сделали 10 повторов или больше. Кружки — подходы тяжелее, но с меньшим числом повторов (95×6). Всё — реально поднятые веса.</p>
+
+<div class="w" style="margin-top:10px"><div class="w-pane">
+  <div class="w-sub">Сейчас на 10 повторов</div>
+  <div><span class="w-big">75 кг × 10</span> <span class="w-sub">&nbsp;тяжелее: 85 кг × 6 (18 окт)</span></div>
+  <div class="w-card">
+    <svg viewBox="0 0 340 170" width="100%">
+      <g stroke="#262c27" stroke-width="1">
+        <line x1="34" y1="14" x2="334" y2="14"/><line x1="34" y1="47" x2="334" y2="47"/><line x1="34" y1="80" x2="334" y2="80"/><line x1="34" y1="113" x2="334" y2="113"/><line x1="34" y1="146" x2="334" y2="146"/>
+      </g>
+      <g fill="#8a958c" text-anchor="end">
+        <text x="30" y="17">105</text><text x="30" y="50">95</text><text x="30" y="83">85</text><text x="30" y="116">75</text><text x="30" y="149">65</text>
+      </g>
+      <g fill="#8a958c" text-anchor="middle">
+        <text x="59" y="164">май</text><text x="109" y="164">июн</text><text x="159" y="164">июл</text><text x="209" y="164">авг</text><text x="259" y="164">сен</text><text x="309" y="164">окт</text>
+      </g>
+      <rect x="236" y="14" width="46" height="132" fill="#ff7a45" opacity="0.07"/>
+      <text x="259" y="30" fill="#ff7a45" text-anchor="middle" opacity="0.8">перерыв</text>
+      <polyline points="59,80 109,47 159,80 209,113" fill="none" stroke="#c4f135" stroke-width="2.2"/>
+      <line x1="209" y1="113" x2="309" y2="113" stroke="#c4f135" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.6"/>
+      <g fill="#c4f135"><circle cx="59" cy="80" r="4"/><circle cx="109" cy="47" r="4"/><circle cx="159" cy="80" r="4"/><circle cx="209" cy="113" r="4"/><circle cx="309" cy="113" r="4"/></g>
+      <g fill="#eef2ec" text-anchor="middle">
+        <text x="59" y="97">85</text><text x="109" y="64">95</text><text x="159" y="97">85</text><text x="209" y="130">75</text><text x="309" y="130">75</text>
+      </g>
+      <g fill="none" stroke="#8a958c" stroke-width="1.5"><circle cx="59" cy="47" r="4"/><circle cx="109" cy="30.5" r="4"/><circle cx="209" cy="47" r="4"/><circle cx="309" cy="80" r="4"/></g>
+      <g fill="#8a958c" text-anchor="start">
+        <text x="66" y="44">95×6</text><text x="116" y="28">100×5</text><text x="216" y="44">95×8</text><text x="290" y="72">85×6</text>
+      </g>
+    </svg>
+    <div class="w-legend"><span><span class="w-sw" style="background:#c4f135"></span>вес на 10+ повторов</span><span><span class="w-sw" style="border:1.5px solid #8a958c"></span>тяжелее, но меньше повторов</span></div>
+  </div>
+</div></div>
+</div>
+</div>
+
+<div class="option" data-choice="b" onclick="toggleSelect(this)">
+<div class="letter">B</div>
+<div class="content">
+<h3>Расчётный максимум</h3>
+<p>Каждый подход пересчитан в вес «на один раз» по формуле (95 кг × 6 ≈ 114). Одна линия, в ней учтены все подходы. Но цифра условная: такой вес вы не поднимали.</p>
+
+<div class="w" style="margin-top:10px"><div class="w-pane">
+  <div class="w-sub">Расчётный максимум сейчас</div>
+  <div><span class="w-big">102 кг</span> <span class="w-sub">&nbsp;из 85 кг × 6 (18 окт)</span></div>
+  <div class="w-card">
+    <svg viewBox="0 0 340 170" width="100%">
+      <g stroke="#262c27" stroke-width="1">
+        <line x1="34" y1="14" x2="334" y2="14"/><line x1="34" y1="47" x2="334" y2="47"/><line x1="34" y1="80" x2="334" y2="80"/><line x1="34" y1="113" x2="334" y2="113"/><line x1="34" y1="146" x2="334" y2="146"/>
+      </g>
+      <g fill="#8a958c" text-anchor="end">
+        <text x="30" y="17">134</text><text x="30" y="50">124</text><text x="30" y="83">114</text><text x="30" y="116">104</text><text x="30" y="149">94</text>
+      </g>
+      <g fill="#8a958c" text-anchor="middle">
+        <text x="59" y="164">май</text><text x="109" y="164">июн</text><text x="159" y="164">июл</text><text x="209" y="164">авг</text><text x="259" y="164">сен</text><text x="309" y="164">окт</text>
+      </g>
+      <rect x="236" y="14" width="46" height="132" fill="#ff7a45" opacity="0.07"/>
+      <text x="259" y="30" fill="#ff7a45" text-anchor="middle" opacity="0.8">перерыв</text>
+      <polyline points="59,80 109,37 159,80 209,57" fill="none" stroke="#c4f135" stroke-width="2.2"/>
+      <line x1="209" y1="57" x2="309" y2="120" stroke="#c4f135" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.6"/>
+      <g fill="#c4f135"><circle cx="59" cy="80" r="4"/><circle cx="109" cy="37" r="4"/><circle cx="159" cy="80" r="4"/><circle cx="209" cy="57" r="4"/><circle cx="309" cy="120" r="4"/></g>
+      <g fill="#eef2ec" text-anchor="middle">
+        <text x="59" y="97">114</text><text x="109" y="30">127</text><text x="159" y="97">113</text><text x="209" y="50">120</text><text x="309" y="137">102</text>
+      </g>
+    </svg>
+    <div class="w-legend"><span><span class="w-sw" style="background:#c4f135"></span>расчётный вес на 1 раз, лучший за месяц</span></div>
+  </div>
+</div></div>
+</div>
+</div>
+
+</div>
