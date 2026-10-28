@@ -1,6 +1,6 @@
 # Проект 3: прогресс по упражнению и подсказка «держим или добавляем»
 
-> **Дата:** 2026-10-27 · **Статус:** утверждена пользователем 2026-10-27; план — [`2026-10-27-exercise-progress.md`](../plans/2026-10-27-exercise-progress.md) · **Основа:** [`CLAUDE.md`](../../../CLAUDE.md), [`docs/architecture.md`](../../architecture.md) (решения 9, 16–18), [проект 2](2026-10-23-activity-import-design.md)
+> **Дата:** 2026-10-27 · **Статус:** реализована на ветке `claude/hopeful-swirles-c3f688`, ждёт приёмки пользователем; план — [`2026-10-27-exercise-progress.md`](../plans/2026-10-27-exercise-progress.md) · **Основа:** [`CLAUDE.md`](../../../CLAUDE.md), [`docs/architecture.md`](../../architecture.md) (решения 9, 16–18), [проект 2](2026-10-23-activity-import-design.md)
 
 ## 1. Зачем
 

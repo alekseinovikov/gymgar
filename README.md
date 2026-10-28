@@ -6,7 +6,7 @@ English · [Русский](#русский)
 
 Gymgar is a native desktop app for strength training, written in Rust (egui/eframe, no webview). Its main value is analytics that Garmin Connect does not have: weight progress per exercise over time, muscle-group load by week and month, and how the body responds (sleep, HRV) in relation to training. All data comes from your Garmin account. The interface is in English and Russian, and an MCP server lets AI agents do what you do in the window.
 
-**Status: early.** Two of several projects are done. What works today: connecting Gymgar to Garmin Connect with your personal API key (with a warning a week before the key expires), loading your activities from Garmin, the Activities screen where you look through strength workouts set by set and correct what the watch recorded wrong, switching the interface language, and an MCP server through which an agent can read and correct the same data. Charts, reports and the workout editor come in later projects.
+**Status: early.** Three of several projects are done. What works today: connecting Gymgar to Garmin Connect with your personal API key (with a warning a week before the key expires), loading your activities from Garmin, the Activities screen where you look through strength workouts set by set and correct what the watch recorded wrong, the Progress screen where every exercise shows how its weight grew and whether to hold it or add, switching the interface language, and an MCP server through which an agent can read and correct the same data. A button that raises the weight in your Garmin program, muscle groups, sleep and HRV, reports and the workout editor come in later projects.
 
 ### Build and run
 
@@ -57,6 +57,16 @@ Once Garmin is connected, Gymgar loads your activities by itself in the backgrou
 
 Weights are shown in kilograms.
 
+### Progress
+
+The Progress screen has a tile for every strength exercise you have done: the working weight and reps of the last session ("80 kg × 10", or "100 kg × 8, 8, 6" when several sets are at that weight), a small chart of the last 12 months and the advice: **can add 85 kg**, **hold** (with how far you are from the target), **break**, **bodyweight** or **no target**. Exercises you can add weight to come first, then the rest, then those on a break; ones you have not done for half a year are last and dimmed. The chips on top show all of them, only those you can add weight to, or only those on a break. Click a tile to open the exercise: the advice with the reasons behind it, the chart and every session (click one to open that workout in Activities).
+
+- **What "can add" means.** The working weight of an exercise in a session is the heaviest weight it was done with, and its reps are the fewest among the sets at that weight. The target is the reps your Garmin workout plans for it (the weight in the plan is not used). If you reached the target at the same weight in two sessions in a row, no more than four weeks apart, Gymgar says you can add: the new weight is about 5% more, rounded up to the step you already use in this exercise (1 to 5 kg, 2.5 kg when there is nothing to tell). Otherwise it says hold and shows how close you are. After a break of more than four weeks the count starts again from the first session back.
+- **The chart** shows the heaviest weight lifted for at least the target reps in each month. Hollow circles are heavier sets done for fewer reps, shaded bands are breaks, and pointing at a point shows its day, weight and reps. The weights are real: there are no estimated maximums. An exercise without weight shows reps instead.
+- **It follows your corrections.** Change a set's weight, reps or exercise, or leave a set or a workout out, and the tiles, the chart and the advice are recalculated at once. Sets done on another machine under the same Garmin name can be moved to another exercise the same way.
+- **Summary and workouts point to it.** Summary lists the exercises you can add weight to ("80 to 85 kg"), and an open workout has a line "Can add: 85 kg" under an exercise when this was its latest session, which leads to that exercise on Progress.
+- **Gymgar only advises.** Nothing is written to Garmin or to your program: change the weight there yourself.
+
 ### Use Gymgar from an AI agent (MCP)
 
 `gymgar-cli mcp` is an MCP server over stdio on the same database as the app. Build it and register it, for example in Claude Code:
@@ -66,7 +76,7 @@ cargo build --release -p gymgar-cli
 claude mcp add gymgar -- <path>/gymgar-cli mcp    # e.g. <path> = /path/to/gymgar/target/release
 ```
 
-Build the app and the CLI in the same profile (both release or both debug), or they will look at different data directories. The server offers two tools: `command_list` shows the commands an agent may run, with their parameters, and `command_run` runs one. Today an agent can read the connection state (`garmin.status`) and the settings (`settings.get`), change the language (`settings.setLanguage`), list and read activities with their sets (`activity.list`, `activity.get`), search exercises (`exercise.search`) and correct sets (`activity.editSets`, `activity.resetSets`, `activity.addSet`, `activity.removeAddedSet`, `activity.setExcluded`); an open Gymgar window picks up a changed language or a correction within a second. An agent cannot enter, replace or delete the key, cannot start a download from Garmin and cannot mark workouts as seen (that mark is for your eyes), and `gymgar-cli` never opens the keychain or talks to Garmin.
+Build the app and the CLI in the same profile (both release or both debug), or they will look at different data directories. The server offers two tools: `command_list` shows the commands an agent may run, with their parameters, and `command_run` runs one. Today an agent can read the connection state (`garmin.status`) and the settings (`settings.get`), change the language (`settings.setLanguage`), list and read activities with their sets (`activity.list`, `activity.get`), search exercises (`exercise.search`), read the progress and advice for every exercise or for one (`progress.list`, `progress.get`) and correct sets (`activity.editSets`, `activity.resetSets`, `activity.addSet`, `activity.removeAddedSet`, `activity.setExcluded`); an open Gymgar window picks up a changed language or a correction within a second. An agent cannot enter, replace or delete the key, cannot start a download from Garmin and cannot mark workouts as seen (that mark is for your eyes), and `gymgar-cli` never opens the keychain or talks to Garmin.
 
 ### Licence
 
@@ -76,7 +86,7 @@ Build the app and the CLI in the same profile (both release or both debug), or t
 
 Gymgar — нативное desktop-приложение на Rust для силовых тренировок (egui/eframe, без webview). Главная ценность — аналитика, которой нет в Garmin Connect: прогресс весов по каждому упражнению во времени, нагрузка на группы мышц по неделям и месяцам, реакция тела (сон, ВСР) в связке с тренировками. Все данные приходят из вашего аккаунта Garmin. Интерфейс на английском и русском, а MCP-сервер позволяет агентам делать то же, что вы делаете в окне.
 
-**Статус: ранний.** Готовы два из нескольких проектов. Сегодня работает: подключение Gymgar к Garmin Connect личным ключом API (с предупреждением за неделю до конца срока ключа), загрузка ваших активностей из Garmin, экран «Тренировки», где силовые тренировки видны по подходам и можно поправить то, что часы записали неверно, переключение языка интерфейса и MCP-сервер, через который агент читает и правит те же данные. Графики, отчёты и редактор тренировок появятся в следующих проектах.
+**Статус: ранний.** Готовы три из нескольких проектов. Сегодня работает: подключение Gymgar к Garmin Connect личным ключом API (с предупреждением за неделю до конца срока ключа), загрузка ваших активностей из Garmin, экран «Тренировки», где силовые тренировки видны по подходам и можно поправить то, что часы записали неверно, экран «Прогресс», где по каждому упражнению видно, как рос вес и пора ли его добавлять, переключение языка интерфейса и MCP-сервер, через который агент читает и правит те же данные. Кнопка, которая поднимает вес в вашей программе Garmin, группы мышц, сон и ВСР, отчёты и редактор тренировок появятся в следующих проектах.
 
 ### Сборка и запуск
 
@@ -127,6 +137,16 @@ Gymgar читает ваши данные через официальный Pers
 
 Вес показан в килограммах.
 
+### Прогресс
+
+На экране «Прогресс» плитка у каждого силового упражнения, которое вы делали: рабочий вес и повторы последнего занятия («80 кг × 10», а если на этом весе несколько подходов, «100 кг × 8, 8, 6»), маленький график за последние 12 месяцев и подсказка: **можно 85 кг**, **держим** (с тем, сколько осталось до цели), **перерыв**, **без веса** или **нет цели**. Сначала идут упражнения, к которым можно добавлять вес, потом остальные, потом те, что в перерыве; не делавшиеся полгода стоят в конце и приглушены. Чипы сверху оставляют все упражнения, только те, к которым можно добавлять, или только те, что в перерыве. Нажмите на плитку, чтобы открыть упражнение: подсказка с объяснением, график и все занятия (нажатие на занятие открывает эту тренировку на экране «Тренировки»).
+
+- **Что значит «можно добавлять».** Рабочий вес упражнения в занятии — самый тяжёлый, с которым оно сделано, а повторы занятия — наименьшие среди подходов на этом весе. Цель — повторы, которые ваша тренировка в Garmin планирует для этого упражнения (вес из плана не используется). Если на одном весе вы взяли цель два занятия подряд, с промежутком не больше четырёх недель, Gymgar говорит, что можно добавлять: новый вес примерно на 5% больше, округлённый вверх до шага, которым вы уже пользовались в этом упражнении (от 1 до 5 кг, а если сказать нечего, 2,5 кг). Иначе он говорит «держим» и показывает, как близко вы к цели. После перерыва больше четырёх недель счёт начинается заново с первого занятия после него.
+- **График** показывает самый тяжёлый вес, поднятый на цель повторов или больше, по каждому месяцу. Пустые кружки — подходы тяжелее, но на меньшее число повторов, закрашенные полосы — перерывы, а при наведении на точку видны день, вес и повторы. Веса настоящие, расчётных максимумов нет. У упражнения без веса график показывает повторы.
+- **Он следует за вашими правками.** Поменяли вес, повторы или упражнение подхода, не учли подход или тренировку — плитки, график и подсказка пересчитываются сразу. Подходы, сделанные на другом тренажёре под тем же названием Garmin, так же можно перенести в другое упражнение.
+- **«Сводка» и тренировки ведут к нему.** «Сводка» перечисляет упражнения, к которым можно добавлять вес («80 до 85 кг»), а в открытой тренировке под упражнением стоит строка «Можно добавлять: 85 кг», если это было его последнее занятие; она ведёт к этому упражнению на экране «Прогресс».
+- **Gymgar только подсказывает.** В Garmin и в вашу программу ничего не пишется: вес там меняете вы сами.
+
 ### Gymgar для ИИ-агента (MCP)
 
 `gymgar-cli mcp` — MCP-сервер по stdio на той же базе, что и приложение. Соберите его и зарегистрируйте, например, в Claude Code:
@@ -136,7 +156,7 @@ cargo build --release -p gymgar-cli
 claude mcp add gymgar -- <путь>/gymgar-cli mcp    # например, <путь> = /путь/к/gymgar/target/release
 ```
 
-Приложение и CLI собирайте в одном профиле (оба release или оба debug), иначе они смотрят в разные каталоги данных. Сервер даёт два инструмента: `command_list` показывает команды, которые агенту можно запускать, вместе с их параметрами, а `command_run` запускает одну из них. Сейчас агент может прочитать статус подключения (`garmin.status`) и настройки (`settings.get`), сменить язык (`settings.setLanguage`), получить список активностей и открыть любую с подходами (`activity.list`, `activity.get`), искать упражнения (`exercise.search`) и править подходы (`activity.editSets`, `activity.resetSets`, `activity.addSet`, `activity.removeAddedSet`, `activity.setExcluded`); открытое окно Gymgar подхватит смену языка или правку за секунду. Агент не может ввести, заменить или удалить ключ, запустить загрузку из Garmin и снять пометку «новая» (она для ваших глаз), а `gymgar-cli` никогда не открывает связку ключей и не ходит в Garmin.
+Приложение и CLI собирайте в одном профиле (оба release или оба debug), иначе они смотрят в разные каталоги данных. Сервер даёт два инструмента: `command_list` показывает команды, которые агенту можно запускать, вместе с их параметрами, а `command_run` запускает одну из них. Сейчас агент может прочитать статус подключения (`garmin.status`) и настройки (`settings.get`), сменить язык (`settings.setLanguage`), получить список активностей и открыть любую с подходами (`activity.list`, `activity.get`), искать упражнения (`exercise.search`), читать прогресс и подсказку по всем упражнениям или по одному (`progress.list`, `progress.get`) и править подходы (`activity.editSets`, `activity.resetSets`, `activity.addSet`, `activity.removeAddedSet`, `activity.setExcluded`); открытое окно Gymgar подхватит смену языка или правку за секунду. Агент не может ввести, заменить или удалить ключ, запустить загрузку из Garmin и снять пометку «новая» (она для ваших глаз), а `gymgar-cli` никогда не открывает связку ключей и не ходит в Garmin.
 
 ### Лицензия
 
