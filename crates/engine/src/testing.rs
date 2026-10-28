@@ -15,9 +15,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
-use chrono::{DateTime, TimeDelta, TimeZone, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeDelta, TimeZone, Utc};
 use gymgar_domain::{
-    ActivityId, ActivitySummary, ConnectionStatus, GarminConnection, KeyTerm, RecordedSet, STRENGTH_TYPE_KEY, SecretBackend, StrengthRecord, key_expires_at,
+    ActivityId, ActivitySummary, ConnectionStatus, ExerciseId, GarminConnection, KeyTerm, Mass, PlannedTarget, RecordedSet, Reps, STRENGTH_TYPE_KEY,
+    SecretBackend, StrengthRecord, key_expires_at,
 };
 use gymgar_store::{FileOutcome, NewActivity, Store};
 use gymgar_sync::list;
@@ -607,5 +608,52 @@ pub fn seed_strength(session: &Session, sets: Vec<RecordedSet>) -> ActivityId {
     session.store().upsert_activities(&[NewActivity { summary, raw_json, is_new: false }], session.now()).expect("store the activity");
     let outcome = FileOutcome::Parsed { zip: None, record: StrengthRecord { workout_name: None, sets, titles: Vec::new() }, parser_version: PARSER_VERSION };
     session.store().apply_file(id, outcome, session.now()).expect("store the sets");
+    id
+}
+
+/// A set of the watch's record for tests: the exercise, the weight in kilograms (0.0 is a set that has a weight of zero, as a
+/// bodyweight set does), the reps and the reps the workout plan asked for (`None`: the plan asked for none). It lasts half a
+/// minute, and [`seed_workout`] says when it began.
+pub fn strength_set(index: u16, exercise: ExerciseId, weight_kg: f64, reps: u32, plan_reps: Option<u32>) -> RecordedSet {
+    RecordedSet {
+        message_index: index,
+        start: DateTime::<Utc>::UNIX_EPOCH,
+        duration_ms: 30_000,
+        reps: Some(Reps::new(reps).expect("reps in range")),
+        weight: Some(Mass::from_kg(weight_kg).expect("a weight in range")),
+        exercise: Some(exercise),
+        step_index: None,
+        plan: plan_reps.map(|plan| PlannedTarget { reps: Some(Reps::new(plan).expect("planned reps in range")), weight: None }),
+        hr_avg: None,
+        hr_max: None,
+        rest_after_ms: None,
+    }
+}
+
+/// Stores the strength activity `id` that began at `local_start` (`2026-10-20 07:55:00`, the wall clock where the user was,
+/// which Garmin sends as `startTimeLocal`) in a zone `utc_offset_hours` ahead of UTC, as if its file had been read (no file is
+/// stored). It holds `sets` and is named `workout_name`; each set begins one minute per message index after the activity,
+/// whatever `start` it came with. It is not new. Returns `id`.
+pub fn seed_workout(store: &Store, id: i64, local_start: &str, utc_offset_hours: i32, workout_name: Option<&str>, sets: Vec<RecordedSet>) -> ActivityId {
+    let local = NaiveDateTime::parse_from_str(local_start, "%Y-%m-%d %H:%M:%S").expect("a local start like 2026-10-20 07:55:00");
+    let start = Utc.from_utc_datetime(&(local - TimeDelta::hours(i64::from(utc_offset_hours))));
+    let sets: Vec<RecordedSet> = sets.into_iter().map(|set| RecordedSet { start: start + TimeDelta::minutes(i64::from(set.message_index)), ..set }).collect();
+    let id = ActivityId(id);
+    let summary = ActivitySummary {
+        id,
+        type_key: STRENGTH_TYPE_KEY.to_owned(),
+        name: None,
+        start,
+        duration_ms: Some(3_600_000),
+        distance_m: None,
+        avg_hr: None,
+        calories: None,
+        manual: false,
+    };
+    let raw_json = serde_json::json!({ "activityId": id.0, "activityType": { "typeKey": STRENGTH_TYPE_KEY }, "startTimeLocal": local_start }).to_string();
+    let now = start + TimeDelta::hours(2);
+    store.upsert_activities(&[NewActivity { summary, raw_json, is_new: false }], now).expect("store the activity");
+    let record = StrengthRecord { workout_name: workout_name.map(str::to_owned), sets, titles: Vec::new() };
+    store.apply_file(id, FileOutcome::Parsed { zip: None, record, parser_version: PARSER_VERSION }, now).expect("store the sets");
     id
 }

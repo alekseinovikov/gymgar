@@ -74,6 +74,8 @@ async fn command_list_shows_activity_commands_but_not_sync_or_mark_seen() {
         "activity.addSet",
         "activity.removeAddedSet",
         "exercise.search",
+        "progress.list",
+        "progress.get",
     ] {
         assert!(listed_ids.contains(&visible), "{visible} is missing from {listed_ids:?}");
     }
@@ -82,7 +84,10 @@ async fn command_list_shows_activity_commands_but_not_sync_or_mark_seen() {
         assert!(!listed_ids.contains(&hidden), "{hidden} must not be listed: {listed_ids:?}");
     }
     // Nothing an agent may run is marked destructive: removing a set only hides it.
-    for command in listed.iter().filter(|command| command["id"].as_str().is_some_and(|id| id.starts_with("activity.") || id.starts_with("exercise."))) {
+    for command in listed
+        .iter()
+        .filter(|command| command["id"].as_str().is_some_and(|id| id.starts_with("activity.") || id.starts_with("exercise.") || id.starts_with("progress.")))
+    {
         assert_eq!(command["destructive"], false, "{command}");
         assert_eq!(command["enabled"], true, "{command}");
     }
@@ -90,6 +95,17 @@ async fn command_list_shows_activity_commands_but_not_sync_or_mark_seen() {
     assert_eq!(by_id("activity.list")["kind"], "query");
     assert_eq!(by_id("activity.get")["kind"], "query");
     assert_eq!(by_id("activity.editSets")["kind"], "mutation");
+    // The progress commands only read.
+    assert_eq!(by_id("progress.list")["kind"], "query");
+    assert_eq!(by_id("progress.get")["kind"], "query");
+    let progress_list = &by_id("progress.list")["paramsSchema"];
+    for filter in ["status", "limit", "offset"] {
+        assert!(progress_list["properties"].get(filter).is_some(), "progress.list has no {filter} param: {progress_list}");
+    }
+    assert_eq!(progress_list["additionalProperties"], false);
+    let progress_get = &by_id("progress.get")["paramsSchema"];
+    assert!(progress_get["properties"].get("exercise").is_some(), "{progress_get}");
+    assert_eq!(progress_get["required"], json!(["exercise"]));
     // The schemas an agent builds its calls from: the filters of the list and the fields of an edit.
     let list_properties = &by_id("activity.list")["paramsSchema"]["properties"];
     for filter in ["from", "to", "types", "strengthOnly", "exercise", "onlyNew", "includeExcluded", "limit", "offset"] {
@@ -158,6 +174,69 @@ async fn command_run_activity_list_with_filters() {
     let by_type = run_ok(&client, "activity.list", json!({ "types": ["strength_training"], "exercise": ROMANIAN, "limit": 5 })).await;
     assert_eq!(activity_ids(&by_type), [strength]);
     assert_eq!(activity_ids(&run_ok(&client, "activity.list", json!({ "limit": 3, "offset": 2 })).await), all_ids[2..5]);
+    client.cancel().await.expect("the client closes");
+}
+
+#[tokio::test]
+async fn command_run_progress_list_and_get() {
+    let (session, _handles) = activity_session();
+    let (client, _mcp) = start(session).await;
+    // The fixture's strength activity is the only history: its exercises are tiles, with what a tile carries and nothing Garmin sent verbatim.
+    let listing = run(&client, "progress.list", json!({})).await;
+    assert!(!is_error(&listing), "{}", text(&listing));
+    for leaked in ["rawJson", "raw_json", "owner", "userProfile", "zip"] {
+        assert!(!text(&listing).contains(leaked), "{leaked} leaked into the progress list");
+    }
+    let all = json_of(&listing);
+    let items = all["items"].as_array().expect("items");
+    assert!(!items.is_empty(), "{all}");
+    let romanian = items.iter().find(|item| item["exercise"]["id"] == ROMANIAN).unwrap_or_else(|| panic!("the Romanian deadlift is a tile: {all}")).clone();
+    for field in ["exercise", "advice", "last", "sessions", "firstDate", "dormant", "chartReps", "sparkline"] {
+        assert!(romanian.get(field).is_some(), "a tile has no {field}: {romanian}");
+    }
+    let status = romanian["advice"]["kind"].clone();
+    assert!(["add", "hold", "break", "bodyweight", "noTarget"].contains(&status.as_str().expect("a status")), "{status}");
+
+    // A filter and a page are cut from the same list.
+    let same_status = run_ok(&client, "progress.list", json!({ "status": [status] })).await;
+    assert!(same_status["items"].as_array().expect("items").contains(&romanian), "{same_status}");
+    let other_statuses: Vec<&str> =
+        ["add", "hold", "break", "bodyweight", "noTarget"].into_iter().filter(|kind| *kind != status.as_str().unwrap_or_default()).collect();
+    let others = run_ok(&client, "progress.list", json!({ "status": other_statuses })).await;
+    assert!(!others["items"].as_array().expect("items").contains(&romanian), "{others}");
+    assert_eq!(run_ok(&client, "progress.list", json!({ "limit": 1 })).await["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(run_ok(&client, "progress.list", json!({ "offset": 1000 })).await["items"], json!([]));
+
+    // One exercise: its tile as the summary, and its sessions with the activity they came from.
+    let one = run(&client, "progress.get", json!({ "exercise": ROMANIAN })).await;
+    assert!(!is_error(&one), "{}", text(&one));
+    for leaked in ["rawJson", "raw_json", "owner", "userProfile", "zip"] {
+        assert!(!text(&one).contains(leaked), "{leaked} leaked into progress.get");
+    }
+    let one = json_of(&one);
+    assert_eq!(one["summary"], romanian);
+    let strength = strength_with_sets(&client).await;
+    let sessions = one["sessions"].as_array().expect("sessions");
+    assert!(!sessions.is_empty() && sessions.iter().all(|session| session["activityId"] == strength), "{one}");
+    for field in ["exercise", "summary", "stepKg", "points", "heavier", "gaps", "sessions"] {
+        assert!(one.get(field).is_some(), "progress.get has no {field}: {one}");
+    }
+    // A key of the catalog the user never did is an answer with nothing in it; a key of nothing is a tool error.
+    let squat = run_ok(&client, "progress.get", json!({ "exercise": SQUAT })).await;
+    assert_eq!((squat["summary"].clone(), squat["sessions"].clone()), (Value::Null, json!([])), "{squat}");
+    for params in [json!({ "exercise": "nonsense/!!" }), json!({ "exercise": 5 }), json!({}), json!({ "exercise": ROMANIAN, "extra": 1 })] {
+        assert_eq!(run_err(&client, "progress.get", params.clone()).await, "BadParams", "{params}");
+    }
+    for params in [json!({ "limit": 0 }), json!({ "limit": 1001 }), json!({ "status": ["maybe"] }), json!({ "unknown": 1 })] {
+        assert_eq!(run_err(&client, "progress.list", params.clone()).await, "BadParams", "{params}");
+    }
+    // A correction the agent makes is in the next answer.
+    let activity = run_ok(&client, "activity.get", json!({ "id": strength })).await;
+    let key =
+        sets_of(&activity).into_iter().find(|set| set["counted"] == true && set["effective"]["exercise"]["id"] == ROMANIAN).expect("a set")["set"].clone();
+    run_ok(&client, "activity.editSets", json!({ "id": strength, "sets": [key], "exercise": SQUAT })).await;
+    let squat = run_ok(&client, "progress.get", json!({ "exercise": SQUAT })).await;
+    assert_eq!(squat["sessions"].as_array().map(Vec::len), Some(1), "{squat}");
     client.cancel().await.expect("the client closes");
 }
 

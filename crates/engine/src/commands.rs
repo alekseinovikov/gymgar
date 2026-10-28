@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{EngineError, Session, activity_cmds, exercise_cmds, garmin_cmds, settings_cmds, sync_cmds};
+use crate::{EngineError, Session, activity_cmds, exercise_cmds, garmin_cmds, progress_cmds, settings_cmds, sync_cmds};
 
 /// Who runs a command. Agents (MCP) may run only commands marked `agent`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,6 +69,7 @@ static REGISTRY: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
     v.extend(sync_cmds::specs());
     v.extend(activity_cmds::specs());
     v.extend(exercise_cmds::specs());
+    v.extend(progress_cmds::specs());
     v
 });
 
@@ -107,7 +108,7 @@ mod tests {
     use std::collections::HashSet;
 
     /// The command table of the design spec (§7 "Commands"): id, kind, agent, destructive.
-    const SPEC_TABLE: [(&str, CommandKind, bool, bool); 17] = [
+    const SPEC_TABLE: [(&str, CommandKind, bool, bool); 19] = [
         ("garmin.status", CommandKind::Query, true, false),
         ("garmin.connect", CommandKind::Job, false, false),
         ("garmin.verify", CommandKind::Job, false, false),
@@ -123,6 +124,8 @@ mod tests {
         ("activity.addSet", CommandKind::Mutation, true, false),
         ("activity.removeAddedSet", CommandKind::Mutation, true, false),
         ("exercise.search", CommandKind::Query, true, false),
+        ("progress.get", CommandKind::Query, true, false),
+        ("progress.list", CommandKind::Query, true, false),
         ("settings.get", CommandKind::Query, true, false),
         ("settings.setLanguage", CommandKind::Mutation, true, false),
     ];

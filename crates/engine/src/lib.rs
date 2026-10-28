@@ -17,9 +17,7 @@ mod exercise_cmds;
 mod garmin_cmds;
 mod jobs;
 pub mod params;
-// `progress.list` and `progress.get` come next and are the only callers of the builders, which stay unused until then (the
-// expectation fails the build once they are used, to be removed with it).
-#[cfg_attr(not(test), expect(dead_code, reason = "built for progress.list and progress.get, which are added next"))]
+mod progress_cmds;
 mod progress_views;
 mod services;
 mod session;
