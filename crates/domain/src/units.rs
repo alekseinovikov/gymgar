@@ -18,6 +18,9 @@ const MAX_REPS: u16 = 1000;
 pub struct Mass(i64);
 
 impl Mass {
+    /// No weight at all: the working weight of a set that has none.
+    pub const ZERO: Mass = Mass(0);
+
     /// From kilograms; must be finite and within `0.0..=1000.0`. Rounds to the nearest gram.
     pub fn from_kg(kg: f64) -> Result<Mass, DomainError> {
         if !(0.0..=MAX_KG).contains(&kg) {
@@ -95,6 +98,14 @@ impl<'de> Deserialize<'de> for Reps {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn mass_zero_is_a_weight_of_nothing() {
+        assert_eq!(Mass::ZERO.grams(), 0);
+        assert!(Mass::ZERO.is_zero());
+        assert_eq!(Mass::ZERO, Mass::from_grams(0).unwrap());
+        assert_eq!(Mass::ZERO, Mass::from_kg(0.0).unwrap());
+    }
 
     #[test]
     fn mass_bounds() {

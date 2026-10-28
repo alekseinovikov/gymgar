@@ -51,12 +51,13 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
             description: "Where the user's weights stand: one entry for every exercise with strength history, each with advice on whether to hold \
                           the weight or add to it. The working weight of an exercise in a session is the heaviest weight it was done with that day; \
                           the session's reps are the fewest reps among the sets at that weight. The target is the reps the Garmin workout planned. \
-                          The status is `add` (the target was met in the last two sessions at the same weight: go up to nextWeightKg), `hold` (keep \
-                          the weight), `break` (not done for more than four weeks), `bodyweight` (the working sets have no weight) or `noTarget` \
-                          (no workout planned any reps, so there is nothing to compare with). Entries come in this order: add, then hold, bodyweight \
-                          and noTarget, then break, then exercises not done for half a year; within a group the one done last first. Each entry \
-                          has its latest session, how many sessions there were and the points of the last twelve months. Read-only. Use \
-                          progress.get for one exercise with its chart and every session.",
+                          The status is `add` (the target was met in the last two sessions at the same weight, no more than 28 days apart: go up \
+                          to nextWeightKg), `hold` (keep the weight), `break` (the last session was more than 28 days ago; this takes precedence \
+                          over every other status), `bodyweight` (the working sets have no weight) or `noTarget` (no workout planned any reps, so \
+                          there is nothing to compare with). Entries come in this order: add, then hold, bodyweight and noTarget, then break, then \
+                          exercises not done for half a year; within a group the one done last first. Each entry has its latest session, how many \
+                          sessions there were and the points of the last twelve months (sparkline, drawn for chartReps as in progress.get). \
+                          Read-only. Use progress.get for one exercise with its chart and every session.",
             kind: CommandKind::Query,
             agent: true,
             destructive: false,
@@ -67,13 +68,17 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
         CommandSpec {
             id: GET,
             description: "One exercise in full: its entry of progress.list (summary; null when the user has no strength history in it), the step its \
-                          weight goes up by (stepKg), one chart point per month (points: the heaviest weight lifted for at least the target reps \
-                          that month), the months where only a heavier weight was lifted for fewer reps (heavier), the pauses of more than four \
-                          weeks (gaps), and every session, newest first, with its working sets, all its sets and the workout program's name. The \
-                          working weight is the heaviest weight of the exercise in a session, a session's reps are the fewest reps among the sets \
-                          at that weight, and the target is the reps the Garmin workout planned. The advice carries what it rests on: the two \
-                          sessions for `add` (basis), the session before the pause for `hold` after a break. `exercise` is a key from \
-                          exercise.search or progress.list; an exercise the user never did answers with a null summary and nothing else. Read-only.",
+                          weight goes up by (stepKg), the chart, the pauses of more than 28 days (gaps), and every session, newest first, with its \
+                          working sets, all its sets and the workout program's name. The chart is drawn for summary.chartReps reps: the target, or \
+                          without one the most common reps of the working sets; it is null for an exercise that never had a weight, and then the \
+                          chart is of reps. points has one point per month: the heaviest weight lifted for at least chartReps reps that month (in a \
+                          chart of reps, the month's best reps with weightKg 0). heavier has a month's heaviest set with fewer than chartReps reps \
+                          where that set is heavier than the month's point, so it appears also in months that have a point, and in months that \
+                          have none; never in a chart of reps. The working weight is the heaviest weight of the exercise in a session, a session's \
+                          reps are the fewest reps among the sets at that weight, and the target is the reps the Garmin workout planned. The advice \
+                          carries what it rests on: the two sessions for `add` (basis), the session before the pause for `hold` after a break. \
+                          `exercise` is a key from exercise.search or progress.list; an exercise the user never did answers with a null summary and \
+                          nothing else. Read-only.",
             kind: CommandKind::Query,
             agent: true,
             destructive: false,

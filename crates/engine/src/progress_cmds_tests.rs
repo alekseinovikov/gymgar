@@ -15,6 +15,7 @@ use gymgar_sync::exercises::{catalog, exercise_key, is_strength, parse_exercise_
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use super::specs;
 use crate::testing::{TestConfig, seed_fixture_activities, seed_workout, strength_set, test_session_on, test_session_with};
 use crate::{AdviceKind, Caller, EngineError, Outcome, PointView, ProgressItemView, ProgressListView, ProgressView, Session, WorkingView};
 
@@ -216,6 +217,31 @@ fn a_key_the_catalog_does_not_name_is_accepted_when_the_user_did_it() {
     assert_eq!(keys(&list(&mut session, json!({}))), ["deadlift/999"]);
     // Still a bad key next to it.
     assert!(matches!(session.execute("progress.get", json!({ "exercise": "deadlift/998" }), Caller::Agent), Err(EngineError::BadParams { .. })));
+}
+
+/// What an agent reads about the two commands has to match what the rule does: the 28 days of `add` and `break`, what the
+/// points and the circles of `progress.get` are, and the chart of reps.
+#[test]
+fn the_descriptions_tell_the_rules_an_agent_depends_on() {
+    let description = |id: &str| specs().into_iter().find(|spec| spec.id == id).map(|spec| spec.description).unwrap_or_default();
+    let list = description("progress.list");
+    for words in ["no more than 28 days apart", "more than 28 days ago", "takes precedence over every other status"] {
+        assert!(list.contains(words), "progress.list should say {words:?}: {list}");
+    }
+    let get = description("progress.get");
+    for words in [
+        "chartReps",
+        "most common reps",
+        "fewer than chartReps reps",
+        "also in months that have a point",
+        "weightKg 0",
+        "never in a chart of reps",
+        "more than 28 days",
+    ] {
+        assert!(get.contains(words), "progress.get should say {words:?}: {get}");
+    }
+    assert!(!get.contains("only a heavier weight was lifted"), "{get}");
+    assert!(!list.contains("four weeks") && !get.contains("four weeks"), "the length of a break is said in days");
 }
 
 #[test]

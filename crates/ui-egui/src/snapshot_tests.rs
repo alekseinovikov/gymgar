@@ -12,7 +12,8 @@
 //! tile in view at the narrow width), with a chip chosen (`progress-add`, `progress-break-filter`) and with nothing to
 //! show (`progress-empty`, and `progress-empty-not-connected`). `progress-detail-<state>` is the page of an exercise (`add`,
 //! `hold`, `after-break`, `bodyweight`, `break`), also as a narrow window as tall as the page (`-800-tall`);
-//! `progress-detail-programs` the same with programs named. `summary-can-add*` is the Summary with the card of what can
+//! `progress-detail-programs` the same with programs named, `progress-detail-bodyweight-weighted` the bodyweight advice
+//! over a chart of weights (the exercise had one before). `summary-can-add*` is the Summary with the card of what can
 //! take more weight and `detail-can-add*` an open workout whose exercise can. The Activities screen and the Summary
 //! with activities are drawn at the smallest window too, 800x500: `<state>-800-<lang>.png`; so is the open activity
 //! (`detail-*`): a strength workout with corrections, another activity, and the three states without sets; and the
@@ -446,6 +447,19 @@ fn render_snapshots() {
             let (mut app, _handles) = app_with_workouts(lang, &workouts);
             app.open_exercise(Some("squat".to_owned()));
             save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-detail-programs{suffix}"), lang);
+        }
+
+        // An exercise that had a weight and whose last session had none: the advice is that of bodyweight, the chart is of weights.
+        for (size, suffix) in SIZES {
+            let squat = ExerciseId { category: 28, name: None };
+            let workouts = vec![
+                ("2026-08-17 08:00:00", Some("Legs"), vec![strength_set(0, squat, 75.0, 10, Some(10))]),
+                ("2026-09-07 08:00:00", Some("Legs"), vec![strength_set(0, squat, 75.0, 10, Some(10))]),
+                ("2026-10-20 08:00:00", Some("Legs"), vec![strength_set(0, squat, 0.0, 12, Some(10))]),
+            ];
+            let (mut app, _handles) = app_with_workouts(lang, &workouts);
+            app.open_exercise(Some("squat".to_owned()));
+            save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-detail-bodyweight-weighted{suffix}"), lang);
         }
 
         // 2. Settings before connecting, with the key typed and Garmin's refusal under the form.

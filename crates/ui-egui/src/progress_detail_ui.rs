@@ -226,11 +226,21 @@ pub(crate) fn advice_texts(view: &ProgressView) -> Option<(String, String)> {
         AdviceKind::Add => add_texts(item, year),
         AdviceKind::Hold => hold_texts(item, year),
         AdviceKind::Break => break_texts(item, year),
-        AdviceKind::Bodyweight => (tl!("Bodyweight exercise").to_owned(), tl!("The chart shows reps.").to_owned()),
+        AdviceKind::Bodyweight => bodyweight_texts(item),
         AdviceKind::NoTarget => {
             (tl!("No target in the program").to_owned(), tl!("The advice will appear once the exercise is in a program that plans reps.").to_owned())
         }
     })
+}
+
+/// "Bodyweight exercise": the chart is of reps when the exercise never had a weight, and otherwise of the sessions that
+/// did (the latest one had none, so there is nothing to advise on).
+fn bodyweight_texts(item: &ProgressItemView) -> (String, String) {
+    let explanation = match item.chart_reps {
+        None => tl!("The chart shows reps."),
+        Some(_) => tl!("The last session had no weight, so there is nothing to advise on. The chart shows the sessions with weight."),
+    };
+    (tl!("Bodyweight exercise").to_owned(), explanation.to_owned())
 }
 
 /// "Can add: 85 kg", and the two sessions it rests on and what to expect with the new weight.
@@ -238,10 +248,18 @@ fn add_texts(item: &ProgressItemView, year: i32) -> (String, String) {
     let advice = &item.advice;
     let title = can_add_title(advice);
     let first = match advice.basis.as_slice() {
-        [previous, last] => fill(
-            tl!("{working} two sessions in a row — {dates}."),
-            &[("{working}", &working_text(last, item.chart_reps)), ("{dates}", &dates::two_days(previous.date, last.date, year))],
-        ),
+        [previous, last] => {
+            let dates = dates::two_days(previous.date, last.date, year);
+            match advice.target {
+                // Several sets at the top weight in either session: the rule asks every one of them to hit the target, which
+                // "80 kg × 12, 13" of one session does not say (the other one may have done other reps).
+                Some(target) if previous.reps.len() > 1 || last.reps.len() > 1 => fill(
+                    tl!("Every set at {weight} hit {target} two sessions in a row — {dates}."),
+                    &[("{weight}", &numbers::kg(last.weight_kg)), ("{target}", &target.to_string()), ("{dates}", &dates)],
+                ),
+                _ => fill(tl!("{working} two sessions in a row — {dates}."), &[("{working}", &working_text(last, item.chart_reps)), ("{dates}", &dates)]),
+            }
+        }
         _ => fill(tl!("{working} two sessions in a row."), &[("{working}", &working_text(&item.last, item.chart_reps))]),
     };
     let explanation = match (advice.next_weight_kg, advice.target) {

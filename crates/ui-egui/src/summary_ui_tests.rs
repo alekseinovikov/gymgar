@@ -277,8 +277,8 @@ fn a_card_lists_the_exercises_that_can_take_more_weight() {
         let harness = harness(app);
         harness.get_by_label(pick(lang, "Can add weight: 2 exercises", "Можно добавлять: 2 упражнения"));
         // From the weight the exercise is at to the weight it can go to; the step is 2.5 kg, and 50 kg + 5 % is 52.5.
-        harness.get_by_label(pick(lang, "50 to 52.5 kg", "50 до 52,5 кг"));
-        harness.get_by_label(pick(lang, "80 to 85 kg", "80 до 85 кг"));
+        harness.get_by_label(pick(lang, "50 to 52.5 kg", "с 50 до 52,5 кг"));
+        harness.get_by_label(pick(lang, "80 to 85 kg", "с 80 до 85 кг"));
         // In the order of the tiles, the newest advice first.
         assert!(label_top(&harness, "Deadlift") < label_top(&harness, "Squat"), "{lang:?}");
         // The exercise that holds is not on the card.
@@ -298,7 +298,7 @@ fn a_range_follows_its_name_on_one_line() {
         let (app, _handles) = app_with_workouts(lang, &two_can_add());
         let harness = harness(app);
         // The window is 1200 points wide: a range at the card's far edge would be about a thousand points from its name.
-        for (name, range) in [("Squat", pick(lang, "80 to 85 kg", "80 до 85 кг")), ("Deadlift", pick(lang, "50 to 52.5 kg", "50 до 52,5 кг"))] {
+        for (name, range) in [("Squat", pick(lang, "80 to 85 kg", "с 80 до 85 кг")), ("Deadlift", pick(lang, "50 to 52.5 kg", "с 50 до 52,5 кг"))] {
             let (name, range) = (label_rect(&harness, name), label_rect(&harness, range));
             assert!((name.center().y - range.center().y).abs() < 1.0, "{lang:?}: one line: {name:?} and {range:?}");
             let between = range.left() - name.right();
@@ -322,7 +322,7 @@ fn a_long_name_is_cut_and_the_range_stays_whole_on_its_line() {
     let window = egui::vec2(800.0, 500.0);
     let mut harness = harness_sized(app, window);
     harness.run();
-    let range = harness.get_by_role_and_label(Role::Label, "80 до 85 кг").rect();
+    let range = harness.get_by_role_and_label(Role::Label, "с 80 до 85 кг").rect();
     let name = harness.get_by_role_and_label(Role::Label, &title).rect();
     assert!(name.right() <= range.left(), "the name runs into the range: {name:?} and {range:?}");
     assert!(range.right() <= window.x, "the range runs out of the window: {range:?}");
@@ -375,13 +375,13 @@ fn the_card_lists_five_exercises_and_counts_the_rest() {
             six.get_by_label(name);
         }
         assert!(six.query_by_label("Squat").is_none(), "{lang:?}: the sixth is counted, not listed");
-        assert_eq!(six.get_all_by_label(pick(lang, "80 to 85 kg", "80 до 85 кг")).count(), 5, "{lang:?}");
+        assert_eq!(six.get_all_by_label(pick(lang, "80 to 85 kg", "с 80 до 85 кг")).count(), 5, "{lang:?}");
         six.get_by_label(pick(lang, "and 1 more", "и ещё 1"));
 
         // Five fit; the card then says nothing of the rest.
         let (app, _handles) = app_with_workouts(lang, &six_can_add(5));
         let five = harness(app);
-        assert_eq!(five.get_all_by_label(pick(lang, "80 to 85 kg", "80 до 85 кг")).count(), 5, "{lang:?}");
+        assert_eq!(five.get_all_by_label(pick(lang, "80 to 85 kg", "с 80 до 85 кг")).count(), 5, "{lang:?}");
         assert!(five.query_by_label_contains(pick(lang, "more", "ещё")).is_none(), "{lang:?}");
     }
 }

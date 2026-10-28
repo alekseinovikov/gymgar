@@ -90,6 +90,12 @@ fn after_break(days: i64, before: Option<WorkingView>, last: WorkingView) -> Pro
     view_with(advice, last)
 }
 
+/// The same page for an exercise that never had a weight: its chart is of reps.
+fn without_chart_reps(mut view: ProgressView) -> ProgressView {
+    view.summary.as_mut().expect("a summary").chart_reps = None;
+    view
+}
+
 fn on_break(days: Option<i64>, last: WorkingView) -> ProgressView {
     view_with(AdviceView { break_days: days, ..advice(AdviceKind::Break) }, last)
 }
@@ -121,12 +127,45 @@ fn advice_texts_say_why_in_both_languages() {
         },
         Row {
             name: "add, a target other than 10 says a couple of reps fewer",
-            view: add(12, 85.0, working(80.0, &[12], day(2026, 8, 2)), working(80.0, &[12, 13], day(2026, 8, 18))),
+            view: add(12, 85.0, working(80.0, &[12], day(2026, 8, 2)), working(80.0, &[12], day(2026, 8, 18))),
+            en: ("Can add: 85 kg", "80 kg × 12 two sessions in a row — 2 and 18 August. With 85 kg expect a couple of reps fewer, then build back up to 12."),
+            ru: ("Можно добавлять: 85 кг", "80 кг × 12 два занятия подряд — 2 и 18 августа. С 85 кг ждите на пару повторов меньше, дальше снова до 12."),
+        },
+        Row {
+            name: "add, several sets at the top weight say what the rule checks, not the reps of one session",
+            view: add(12, 85.0, working(80.0, &[12, 12], day(2026, 8, 2)), working(80.0, &[12, 13], day(2026, 8, 18))),
             en: (
                 "Can add: 85 kg",
-                "80 kg × 12, 13 two sessions in a row — 2 and 18 August. With 85 kg expect a couple of reps fewer, then build back up to 12.",
+                "Every set at 80 kg hit 12 two sessions in a row — 2 and 18 August. With 85 kg expect a couple of reps fewer, then build back up to 12.",
             ),
-            ru: ("Можно добавлять: 85 кг", "80 кг × 12, 13 два занятия подряд — 2 и 18 августа. С 85 кг ждите на пару повторов меньше, дальше снова до 12."),
+            ru: (
+                "Можно добавлять: 85 кг",
+                "Все подходы на 80 кг сделали 12 два занятия подряд — 2 и 18 августа. С 85 кг ждите на пару повторов меньше, дальше снова до 12.",
+            ),
+        },
+        Row {
+            name: "add, several sets at the top weight, a target of 10",
+            view: add(10, 75.0, working(70.0, &[10, 10, 10], day(2026, 8, 2)), working(70.0, &[10, 10, 10], day(2026, 8, 18))),
+            en: (
+                "Can add: 75 kg",
+                "Every set at 70 kg hit 10 two sessions in a row — 2 and 18 August. With 75 kg expect about 8 reps, then build back up to 10.",
+            ),
+            ru: (
+                "Можно добавлять: 75 кг",
+                "Все подходы на 70 кг сделали 10 два занятия подряд — 2 и 18 августа. С 75 кг ждите около 8 повторов, дальше снова до 10.",
+            ),
+        },
+        Row {
+            name: "add, several sets in the earlier session only",
+            view: add(10, 75.0, working(70.0, &[10, 11], day(2026, 8, 2)), working(70.0, &[10], day(2026, 8, 18))),
+            en: (
+                "Can add: 75 kg",
+                "Every set at 70 kg hit 10 two sessions in a row — 2 and 18 August. With 75 kg expect about 8 reps, then build back up to 10.",
+            ),
+            ru: (
+                "Можно добавлять: 75 кг",
+                "Все подходы на 70 кг сделали 10 два занятия подряд — 2 и 18 августа. С 75 кг ждите около 8 повторов, дальше снова до 10.",
+            ),
         },
         Row {
             name: "hold, one working set",
@@ -189,10 +228,16 @@ fn advice_texts_say_why_in_both_languages() {
             ru: ("Перерыв", "Последнее занятие 16 июня: 75 кг × 10. Первое занятие после перерыва станет новой точкой отсчёта."),
         },
         Row {
-            name: "bodyweight",
-            view: view_with(advice(AdviceKind::Bodyweight), working(0.0, &[12], day(2026, 10, 20))),
+            name: "bodyweight, the exercise never had a weight: the chart shows reps",
+            view: without_chart_reps(view_with(advice(AdviceKind::Bodyweight), working(0.0, &[12], day(2026, 10, 20)))),
             en: ("Bodyweight exercise", "The chart shows reps."),
             ru: ("Упражнение без веса", "График показывает повторы."),
+        },
+        Row {
+            name: "bodyweight, the last session had no weight although earlier ones did: the chart shows the weight",
+            view: view_with(advice(AdviceKind::Bodyweight), working(0.0, &[12], day(2026, 10, 20))),
+            en: ("Bodyweight exercise", "The last session had no weight, so there is nothing to advise on. The chart shows the sessions with weight."),
+            ru: ("Упражнение без веса", "В последнем занятии веса не было, подсказывать нечего. На графике — занятия с весом."),
         },
         Row {
             name: "no target",
@@ -400,7 +445,8 @@ fn detail_shows_advice_chart_and_sessions() {
         assert_eq!(shown.iter().filter(|(fill, _)| *fill == t.accent).count(), 4 + 1, "{lang:?}: the months and the legend");
         assert_eq!(shown.iter().filter(|(fill, stroke)| *fill == egui::Color32::TRANSPARENT && *stroke == t.text_dim).count(), 1 + 1, "{lang:?}");
         harness.get_by_label(pick(lang, "Weight at 10+ reps", "Вес на 10+ повторов"));
-        harness.get_by_label(pick(lang, "Heavier, fewer reps", "Тяжелее, но меньше повторов"));
+        harness.get_by_label(pick(lang, "Fewer than 10 reps", "Меньше 10 повторов"));
+        assert!(harness.query_by_label(pick(lang, "Heavier, fewer reps", "Тяжелее, но меньше повторов")).is_none(), "{lang:?}: the old name");
         // The sessions, newest first, each with what it did.
         let dates = ["24 October", "20 October", "28 September", "7 September", "17 August", "27 July", "6 July"];
         let ru_dates = ["24 октября", "20 октября", "28 сентября", "7 сентября", "17 августа", "27 июля", "6 июля"];
@@ -528,6 +574,17 @@ fn chart_draws_odd_series() {
         let harness =
             ui_page(chart_of(Vec::new(), vec![point("2026-09", 90.0, 6, day(2026, 9, 28)), point("2026-10", 95.0, 5, day(2026, 10, 20))], Vec::new()), size);
         assert_eq!((filled(&harness), hollow(&harness)), (1, 2 + 1), "{lang:?}: the legend has only what is drawn");
+        // A circle may stand in a month that has a point too: the legend says what the circle is (a set under the target), not
+        // that nothing else was lifted.
+        harness.get_by_label(pick(lang, "Fewer than 10 reps", "Меньше 10 повторов"));
+        // The reps are the target of the exercise, and decline in Russian: 1, 21 and 22 take other forms than 10.
+        for (target, en, ru) in
+            [(1, "Fewer than 1 rep", "Меньше 1 повтора"), (21, "Fewer than 21 reps", "Меньше 21 повтора"), (22, "Fewer than 22 reps", "Меньше 22 повторов")]
+        {
+            let mut other = chart_of(Vec::new(), vec![point("2026-09", 90.0, 0, day(2026, 9, 28))], Vec::new());
+            other.summary.as_mut().expect("a summary").chart_reps = Some(target);
+            ui_page(other, size).get_by_label(pick(lang, en, ru));
+        }
         // The chart of reps: the exercise never had a weight.
         let mut reps = chart_of(
             vec![point("2026-08", 0.0, 8, day(2026, 8, 3)), point("2026-09", 0.0, 10, day(2026, 9, 3)), point("2026-10", 0.0, 12, day(2026, 10, 20))],
@@ -538,6 +595,9 @@ fn chart_draws_odd_series() {
         let harness = ui_page(reps, size);
         assert_eq!(filled(&harness), 3 + 1, "{lang:?}");
         harness.get_by_label(pick(lang, "Best reps of the month", "Лучшие повторы месяца"));
+        // A chart of reps has no circles, and no legend entry for them.
+        assert_eq!(hollow(&harness), 0, "{lang:?}");
+        assert!(harness.query_by_label_contains(pick(lang, "Fewer than", "Меньше")).is_none(), "{lang:?}");
         // A break that is going on: shaded to today, with no point after it.
         let harness = ui_page(
             chart_of(vec![point("2026-06", 75.0, 10, day(2026, 6, 16))], Vec::new(), vec![GapView { from: day(2026, 6, 16), to: None, days: 70 }]),

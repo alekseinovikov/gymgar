@@ -222,6 +222,11 @@ fn advice_table() {
                 after_break: Some(AfterBreak { days: 29, before: 0 }),
             },
         ),
+        (
+            "the step comes from the history: 24 and 25 kg make it 1 kg, so 25 kg goes to 27 and not to 27.5",
+            vec![planned("2026-09-10", &[(24.0, 10)]), planned("2026-09-30", &[(25.0, 10)]), planned("2026-10-10", &[(25.0, 10)])],
+            Advice::Add { weight: kg(25.0), to: kg(27.0), target: 10, previous: 1, last: 2 },
+        ),
         ("the last session was 28 days ago", vec![planned("2026-09-29", &[(80.0, 10)])], hold(80.0, 10, 1, true)),
         ("the last session was 29 days ago", vec![planned("2026-09-28", &[(80.0, 10)])], Advice::Break { days: 29, last: 0 }),
         (

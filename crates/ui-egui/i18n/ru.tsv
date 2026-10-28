@@ -266,7 +266,9 @@ Weight at {} reps	Вес на {} повторов
 Reps by month	Повторы по месяцам
 Weight at {}+ reps	Вес на {}+ повторов
 Best reps of the month	Лучшие повторы месяца
-Heavier, fewer reps	Тяжелее, но меньше повторов
+Fewer than {} rep	Меньше {} повтора
+Fewer than {} reps (2 to 4)	Меньше {} повторов
+Fewer than {} reps	Меньше {} повторов
 Break	Перерыв
 Nothing to chart yet	Пока нечего показать на графике
 May|label	май
@@ -275,6 +277,7 @@ Can add: {}	Можно добавлять: {}
 Can add weight	Можно добавлять вес
 {working} two sessions in a row — {dates}.	{working} два занятия подряд — {dates}.
 {working} two sessions in a row.	{working} два занятия подряд.
+Every set at {weight} hit {target} two sessions in a row — {dates}.	Все подходы на {weight} сделали {target} два занятия подряд — {dates}.
 With {weight} expect about 8 reps, then build back up to {target}.	С {weight} ждите около 8 повторов, дальше снова до {target}.
 With {weight} expect a couple of reps fewer, then build back up to {target}.	С {weight} ждите на пару повторов меньше, дальше снова до {target}.
 Hold {}	Держим {}
@@ -293,6 +296,7 @@ Break {} weeks	Перерыв {} недель
 Last session {date}: {working}. The first session after the break will be the new starting point.	Последнее занятие {date}: {working}. Первое занятие после перерыва станет новой точкой отсчёта.
 Bodyweight exercise	Упражнение без веса
 The chart shows reps.	График показывает повторы.
+The last session had no weight, so there is nothing to advise on. The chart shows the sessions with weight.	В последнем занятии веса не было, подсказывать нечего. На графике — занятия с весом.
 No target in the program	Нет цели по программе
 The advice will appear once the exercise is in a program that plans reps.	Подсказка появится, когда упражнение пойдёт по программе с повторами в плане.
 
@@ -301,7 +305,7 @@ The advice will appear once the exercise is in a program that plans reps.	Под
 Can add weight: {} exercise	Можно добавлять: {} упражнение
 Can add weight: {} exercises (2 to 4)	Можно добавлять: {} упражнения
 Can add weight: {} exercises	Можно добавлять: {} упражнений
-{from} to {to}	{from} до {to}
+{from} to {to}	с {from} до {to}
 and {} more	и ещё {}
 Open progress	Открыть прогресс
 open progress	открыть прогресс

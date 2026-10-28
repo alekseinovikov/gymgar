@@ -61,15 +61,8 @@ pub struct WorkingSets {
     pub set: ProgressSet,
 }
 
-/// A `Mass` from a value this module has already proven to be in range: zero, or a step clamped to `STEP_MIN_G..=STEP_MAX_G`.
-/// `Mass` has no constant for zero and `weight_step` must return one, so this is the one place that cannot be a `?`.
-#[allow(clippy::expect_used)]
-fn in_range(grams: i64) -> Mass {
-    Mass::from_grams(grams).expect("callers pass zero or a value clamped into the step bounds, all within 0..=1_000_000 g")
-}
-
 fn weight_of(set: &ProgressSet) -> Mass {
-    set.weight.unwrap_or_else(|| in_range(0))
+    set.weight.unwrap_or(Mass::ZERO)
 }
 
 fn reps_of(set: &ProgressSet) -> u16 {
@@ -123,7 +116,10 @@ pub fn weight_step(sessions: &[ExerciseSession]) -> Mass {
     weights.sort_unstable();
     weights.dedup();
     let smallest = weights.iter().zip(weights.iter().skip(1)).filter_map(|(low, high)| high.checked_sub(*low)).filter(|&difference| difference > 0).min();
-    in_range(smallest.map_or(STEP_DEFAULT_G, |difference| difference.clamp(STEP_MIN_G, STEP_MAX_G)))
+    let grams = smallest.map_or(STEP_DEFAULT_G, |difference| difference.clamp(STEP_MIN_G, STEP_MAX_G));
+    // Always within `STEP_MIN_G..=STEP_MAX_G`, so it is a valid `Mass`. Were it ever not, a step of nothing is the
+    // safe answer: `next_weight` returns `None` for it and no advice to add weight is given.
+    Mass::from_grams(grams).unwrap_or(Mass::ZERO)
 }
 
 /// The next weight: the smallest multiple of `step` that is strictly above `weight` and at least `ADD_PERCENT` percent

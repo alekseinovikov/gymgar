@@ -354,8 +354,13 @@ fn legend(ui: &mut Ui, chart: &Chart<'_>, view: &ProgressView) {
         swatch(ui, &points, |painter, rect| {
             painter.circle_filled(rect.center(), metrics::LEGEND_SWATCH / 2.0, t.accent);
         });
-        if !chart.heavier.is_empty() {
-            swatch(ui, tl!("Heavier, fewer reps"), |painter, rect| {
+        // A circle is the heaviest set with fewer reps than the points have, whether or not its month has a point as well. A
+        // chart of reps has no circles; and without reps to name there is nothing true to say about one.
+        if !chart.heavier.is_empty()
+            && let Some(reps) = reps
+        {
+            let text = trn(u64::from(reps), tl!("Fewer than {} rep"), tl!("Fewer than {} reps (2 to 4)"), tl!("Fewer than {} reps"));
+            swatch(ui, &text, |painter, rect| {
                 painter.circle_stroke(rect.center(), metrics::LEGEND_SWATCH / 2.0 - 0.75, Stroke::new(1.5, t.text_dim));
             });
         }
