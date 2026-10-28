@@ -20,7 +20,7 @@ use std::time::Duration;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 pub use activities::{FileOutcome, NewActivity, SyncSnapshot, SyncState};
-pub use activity_queries::{ActivityDetail, ActivityFilter, ActivityRow};
+pub use activity_queries::{ActivityDetail, ActivityFilter, ActivityRow, HistorySet};
 pub use corrections::SetChange;
 pub use error::StoreError;
 

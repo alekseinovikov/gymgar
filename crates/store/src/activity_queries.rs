@@ -1,17 +1,18 @@
 //! Reading imported activities back: the list with its filters, one activity in full, the number of new ones, exercise
-//! titles and how often each exercise was done.
+//! titles, how often each exercise was done and the counted sets one by one.
 //!
 //! Nothing here writes. The list never reads sets: it uses the counts stored with each activity (`counted_sets`,
-//! `exercise_count`, kept by `recount`), so a long history stays cheap. Only the `exercise` filter and
-//! `exercise_usage` look at sets, and they apply the same rule as `recount` (the SQL below mirrors it, in one place):
+//! `exercise_count`, kept by `recount`), so a long history stays cheap. Only the `exercise` filter, `exercise_usage`
+//! and `strength_history` look at sets, and they apply the same rule as `recount` (the SQL below mirrors it, in one place):
 //! the correction over the record, the user's flag over the empty-set rule, nothing in an excluded activity, no
-//! removed added sets, and "no exercise" and Garmin's unknown category are not exercises. A test keeps the three in step.
+//! removed added sets, and "no exercise" and Garmin's unknown category are not exercises. A test keeps them in step.
 
 use std::collections::{BTreeMap, HashMap};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use gymgar_domain::{
-    ActivityId, ActivitySummary, AddedSet, EMPTY_SET_MAX_MS, ExerciseId, FileState, PlannedTarget, RecordedSet, STRENGTH_TYPE_KEY, SetCorrection, SetRef,
+    ActivityId, ActivitySummary, AddedSet, EMPTY_SET_MAX_MS, ExerciseId, FileState, Mass, PlannedTarget, RecordedSet, Reps, STRENGTH_TYPE_KEY, SetCorrection,
+    SetRef,
 };
 use rusqlite::types::Value;
 use rusqlite::{Row, params, params_from_iter};
@@ -64,6 +65,25 @@ pub struct ActivityDetail {
     pub added: Vec<AddedSet>,
 }
 
+/// One counted set with its final values (the correction over the record), for the progress of an exercise.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistorySet {
+    pub activity: ActivityId,
+    /// When the activity began, in UTC.
+    pub start: DateTime<Utc>,
+    /// The wall-clock time of the start where it was recorded, as Garmin gives it (`startTimeLocal`). Garmin writes it
+    /// without a zone, so it is a plain date and time, and it is the day the user would call the training day. `None`
+    /// when the activity has none or it does not read.
+    pub local_start: Option<NaiveDateTime>,
+    pub workout_name: Option<String>,
+    pub set: SetRef,
+    pub exercise: ExerciseId,
+    pub weight: Option<Mass>,
+    pub reps: Option<Reps>,
+    /// What the workout plan asked for. Only a set from the record has a plan; an added set has none.
+    pub plan_reps: Option<Reps>,
+}
+
 const ACTIVITY_COLUMNS: &str = "a.id, a.type_key, a.name, a.start_at, a.duration_ms, a.distance_m, a.avg_hr, a.calories, a.manual,
      a.seen_at, a.excluded, a.file_state, a.workout_name, a.counted_sets, a.exercise_count";
 
@@ -75,6 +95,10 @@ const RECORDED_CATEGORY: &str = "COALESCE(c.exercise_category, r.exercise_catego
 // A correction names the exercise by its category; the name goes with it.
 const RECORDED_NAME: &str = "CASE WHEN c.exercise_category IS NOT NULL THEN c.exercise_name ELSE r.exercise_name END";
 const ADDED_COUNTS: &str = "s.deleted_at IS NULL AND COALESCE(s.counted, 1) = 1";
+// Garmin's wall-clock start of an activity, as the raw JSON of the list item has it. `json_extract` fails the whole
+// query on malformed JSON and returns a number as a number, so only text from valid JSON is let through; whether the
+// text is a date and time is for the reader to say.
+const LOCAL_START: &str = "CASE WHEN json_valid(a.raw_json) THEN json_extract(a.raw_json, '$.startTimeLocal') END";
 
 /// The user's flag if there is one, else "not empty" by the effective reps and weight (`domain::is_empty_set`).
 fn recorded_counts() -> String {
@@ -209,6 +233,42 @@ fn read_added_set(row: &Row<'_>) -> Result<AddedSet, StoreError> {
     Ok(AddedSet { id: row.get(0)?, after, exercise, weight: read_mass(row.get(5)?)?, reps: read_reps(row.get(6)?)?, counted: row.get(7)? })
 }
 
+/// The kind of a row of the history query: a set from the record, or one the user added.
+const HISTORY_RECORDED: i64 = 0;
+const HISTORY_ADDED: i64 = 1;
+
+/// The local start is whatever the JSON held there: anything but text of the form `2026-11-01 00:30:00` is no time.
+fn read_local_start(value: Value) -> Option<NaiveDateTime> {
+    match value {
+        Value::Text(text) => NaiveDateTime::parse_from_str(&text, "%Y-%m-%d %H:%M:%S").ok(),
+        _ => None,
+    }
+}
+
+fn read_history_set(row: &Row<'_>) -> Result<HistorySet, StoreError> {
+    let start: String = row.get(1)?;
+    let kind: i64 = row.get(4)?;
+    let index: i64 = row.get(5)?;
+    let set = match kind {
+        HISTORY_RECORDED => SetRef::Recorded(u16::try_from(index).map_err(|_| corrupt("recorded_set.message_index", index))?),
+        HISTORY_ADDED => SetRef::Added(index),
+        other => return Err(corrupt("history kind", other)),
+    };
+    let category: Option<i64> = row.get(6)?;
+    let exercise = read_exercise((category, row.get(7)?))?.ok_or_else(|| corrupt("exercise_category", category))?;
+    Ok(HistorySet {
+        activity: ActivityId(row.get(0)?),
+        start: parse_time("start_at", &start)?,
+        local_start: read_local_start(row.get(2)?),
+        workout_name: row.get(3)?,
+        set,
+        exercise,
+        weight: read_mass(row.get(8)?)?,
+        reps: read_reps(row.get(9)?)?,
+        plan_reps: read_reps(row.get(10)?)?,
+    })
+}
+
 /// Runs a query and turns each row with `read`; unlike `query_map`, `read` may fail with a `StoreError`.
 fn collect<T>(
     statement: &mut rusqlite::Statement<'_>,
@@ -319,6 +379,34 @@ impl Store {
             }
         }
         Ok(usage)
+    }
+
+    /// Every counted set of every activity that is not excluded, with its final values, oldest activity first: by the
+    /// start, then (so that two activities begun in the same second do not mix) by the id, then the sets of the record
+    /// in the order of the file, then the added ones in the order they were made. The same sets `exercise_usage`
+    /// counts: "no exercise" and the unknown category are not here. It is for progress, so it reads the whole history
+    /// in one query and leaves the grouping to the caller.
+    pub fn strength_history(&self) -> Result<Vec<HistorySet>, StoreError> {
+        let counts = recorded_counts();
+        let sql = format!(
+            "SELECT activity_id, start_at, local_start, workout_name, kind, idx, category, name, weight_g, reps, plan_reps FROM (
+                 SELECT a.id AS activity_id, a.start_at AS start_at, {LOCAL_START} AS local_start, a.workout_name AS workout_name,
+                        {HISTORY_RECORDED} AS kind, r.message_index AS idx, {RECORDED_CATEGORY} AS category, {RECORDED_NAME} AS name,
+                        COALESCE(c.weight_g, r.weight_g) AS weight_g, COALESCE(c.reps, r.reps) AS reps, r.plan_reps AS plan_reps
+                 FROM {RECORDED_FROM} JOIN activity a ON a.id = r.activity_id
+                 WHERE a.excluded = 0 AND {counts}
+                 UNION ALL
+                 SELECT a.id, a.start_at, {LOCAL_START}, a.workout_name,
+                        {HISTORY_ADDED}, s.id, s.exercise_category, s.exercise_name,
+                        s.weight_g, s.reps, NULL
+                 FROM added_set s JOIN activity a ON a.id = s.activity_id
+                 WHERE a.excluded = 0 AND {ADDED_COUNTS}
+             ) WHERE category IS NOT NULL AND category <> {unknown}
+             ORDER BY start_at, activity_id, kind, idx",
+            unknown = ExerciseId::UNKNOWN_CATEGORY,
+        );
+        let mut statement = self.conn.prepare(&sql)?;
+        collect(&mut statement, params![], read_history_set)
     }
 }
 
