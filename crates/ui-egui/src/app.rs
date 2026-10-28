@@ -16,7 +16,8 @@
 //!
 //! Progress is read with the activities (`progress.list`, on every refresh), and the exercise open on it (`progress.get`)
 //! when its key changes and when something may have changed it, with the same signals as the open activity, but not on
-//! every refresh: a sync streaming in refreshes the tiles on every frame, and the open exercise waits for its end.
+//! every refresh: a sync streaming in refreshes the tiles after each frame that applied events of the job (a page of the
+//! list, a file), not on every frame, and the open exercise waits for its end.
 
 use std::time::{Duration, Instant};
 
