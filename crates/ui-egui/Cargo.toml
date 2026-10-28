@@ -16,6 +16,8 @@ gymgar-engine = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
+# The chart on the page of an exercise (Progress).
+egui_plot = { workspace = true }
 # Dates on the Garmin screens are shown in the user's time zone.
 chrono = { workspace = true }
 log = { workspace = true }

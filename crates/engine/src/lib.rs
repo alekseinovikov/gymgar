@@ -17,6 +17,8 @@ mod exercise_cmds;
 mod garmin_cmds;
 mod jobs;
 pub mod params;
+mod progress_cmds;
+mod progress_views;
 mod services;
 mod session;
 mod settings_cmds;
@@ -34,6 +36,9 @@ pub use commands::{Caller, CommandKind, CommandSpec, JobId, Outcome};
 pub use error::EngineError;
 pub use garmin_cmds::{ConnectParams, GarminStatusView};
 pub use jobs::{JobEvent, JobFinished};
+pub use progress_views::{
+    AdviceKind, AdviceView, GapView, PointView, ProgressItemView, ProgressListView, ProgressView, SessionView, SetBriefView, WorkingView,
+};
 pub use services::{BoxFuture, GarminAuth, GarminAuthError, GarminSession, SecretStore, SecretStoreError, SecretStores, Services, Spawner};
 pub use session::Session;
 pub use settings_cmds::SettingsView;

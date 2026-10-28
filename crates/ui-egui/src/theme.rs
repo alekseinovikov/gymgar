@@ -154,6 +154,51 @@ pub mod metrics {
     /// Height of an option in a list to choose from, and the space between its edge and its text.
     pub const OPTION_HEIGHT: f32 = 26.0;
     pub const OPTION_PADDING: f32 = 8.0;
+    /// The exercise tiles of Progress: the narrowest a tile gets (the grid has as many columns as fit), the space between
+    /// its edge and its content, the size of the numbers it shows, and the height and stroke of the line of its chart.
+    pub const TILE_MIN_WIDTH: f32 = 230.0;
+    pub const TILE_PADDING: i8 = 12;
+    pub const TILE_VALUE_SIZE: f32 = 15.0;
+    pub const SPARKLINE_HEIGHT: f32 = 28.0;
+    pub const SPARKLINE_STROKE: f32 = 1.8;
+    /// The dot of a chart that has one point only.
+    pub const SPARKLINE_DOT: f32 = 2.5;
+    /// How much of its colour a tile keeps when it is dimmed: an exercise nobody has done for half a year.
+    pub const DIMMED_OPACITY: f32 = 0.55;
+    /// The status label of a tile: its corner radius and the space between its edge and its text.
+    pub const PILL_RADIUS: f32 = 10.0;
+    pub const PILL_PADDING_X: i8 = 8;
+    pub const PILL_PADDING_Y: i8 = 2;
+    /// The up-chevron before the text of a status that asks to add weight: its size, the thickness of its line and the
+    /// space between it and the text. The fonts have no arrow, so it is drawn.
+    pub const CHEVRON_WIDTH: f32 = 8.0;
+    pub const CHEVRON_HEIGHT: f32 = 5.0;
+    pub const CHEVRON_STROKE: f32 = 1.6;
+    pub const CHEVRON_GAP: f32 = 4.0;
+    /// How much larger the chevron before the title of the advice card is than the one in a tile's status label.
+    pub const CHEVRON_TITLE_SCALE: f32 = 1.6;
+    /// The advice card of an exercise's page: the widest its text runs before it wraps (a line across a wide window is
+    /// hard to read).
+    pub const ADVICE_TEXT_MAX_WIDTH: f32 = 680.0;
+    /// The chart of an exercise: its height, the radius of a point, the width of its line, the length of a dash of the
+    /// line across a break, how much of the warning colour a break is shaded with, the fewest months the axis spans, the
+    /// fewest points between two lines of the weight grid and between two labels of the months, and the size of a swatch
+    /// of its legend.
+    pub const CHART_HEIGHT: f32 = 220.0;
+    pub const CHART_POINT_RADIUS: f32 = 4.0;
+    pub const CHART_LINE_WIDTH: f32 = 2.2;
+    pub const CHART_DASH: f32 = 6.0;
+    pub const GAP_OPACITY: f32 = 0.09;
+    pub const CHART_MIN_MONTHS: f64 = 6.0;
+    pub const CHART_GRID_SPACING: f32 = 32.0;
+    pub const CHART_MONTH_SPACING: f32 = 56.0;
+    pub const LEGEND_SWATCH: f32 = 10.0;
+    /// A session in the list under the chart: its height, the width of its date and of its working set, and the share of
+    /// what is left that its program takes (the sets take the rest).
+    pub const SESSION_ROW_HEIGHT: f32 = 30.0;
+    pub const SESSION_DATE_WIDTH: f32 = 124.0;
+    pub const SESSION_WORKING_WIDTH: f32 = 150.0;
+    pub const SESSION_PROGRAM_SHARE: f32 = 0.3;
 }
 
 fn tokens_id() -> Id {

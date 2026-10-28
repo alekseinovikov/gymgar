@@ -8,6 +8,7 @@ mod error;
 mod exercise;
 mod garmin;
 mod language;
+pub mod progress;
 mod sets;
 mod units;
 

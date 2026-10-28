@@ -10,20 +10,23 @@
 //! its header only.
 //!
 //! It only draws [`GymgarApp::detail`]: the cards, their order, the plans and whether each set counts are the engine's
-//! answer (`activity.get`). A click is a command (`activity.setExcluded`, `activity.editSets`, those of the editor), run
-//! after the frame is drawn; the window then reads the activity again.
+//! answer (`activity.get`). A card of an exercise that can take more weight, in the workout that was its latest session,
+//! has a line under its name that leads to the exercise on Progress (exercise progress spec §2, item 5); which exercises
+//! those are is [`GymgarApp::progress`]'s answer. A click is a command (`activity.setExcluded`, `activity.editSets`, those
+//! of the editor), run after the frame is drawn; the window then reads the activity again.
 
 use chrono::TimeDelta;
 use egui::{
     Align, Color32, CursorIcon, Label, Layout, Rect, RichText, Role, ScrollArea, Sense, Shape, Sides, Stroke, TextStyle, Ui, UiBuilder, WidgetInfo, pos2, vec2,
 };
-use gymgar_domain::{CountReason, FileState, STRENGTH_TYPE_KEY, SetRef};
-use gymgar_engine::{ActivityListItemView, ActivityView, ExerciseGroupView, ExerciseView, PlanView, SetView};
+use gymgar_domain::{ActivityId, CountReason, FileState, STRENGTH_TYPE_KEY, SetRef};
+use gymgar_engine::{ActivityListItemView, ActivityView, AdviceKind, ExerciseGroupView, ExerciseView, PlanView, ProgressItemView, SetView};
 use serde_json::{Map, Value};
 
 use crate::i18n::{self, Lang};
+use crate::progress_ui::can_add_title;
 use crate::set_edit_ui::{self, Request};
-use crate::state::SetEdit;
+use crate::state::{Section, SetEdit};
 use crate::theme::{Tokens, metrics};
 use crate::{GymgarApp, activities_ui, dates, numbers, tl, widgets};
 
@@ -40,6 +43,8 @@ enum Action {
     Count(SetRef, Option<bool>),
     /// Something of the editor of a set or of the exercise picker.
     Edit(Request),
+    /// Open the exercise with this key on Progress.
+    Progress(String),
 }
 
 /// Draws the selected activity in `ui` (the right side of the screen), or says that none is selected.
@@ -71,7 +76,7 @@ pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
         ui.set_max_width(metrics::CONTENT_MAX_WIDTH.min(ui.available_width()));
         header(shown, ui, &detail.summary, &mut action);
         if detail.summary.type_key == STRENGTH_TYPE_KEY {
-            sets(ui, detail, &mut editing, &mut action);
+            sets(ui, detail, shown.progress(), &mut editing, &mut action);
         }
     });
     if let Some(picker) = picker.as_mut() {
@@ -96,6 +101,11 @@ fn act(app: &mut GymgarApp, id: i64, action: Action) {
     params.insert("id".to_owned(), Value::from(id));
     let command = match action {
         Action::Edit(request) => return set_edit_ui::run(app, id, request),
+        Action::Progress(key) => {
+            app.ui.section = Section::Progress;
+            app.open_exercise(Some(key));
+            return;
+        }
         Action::Exclude(excluded) => {
             params.insert("excluded".to_owned(), Value::Bool(excluded));
             "activity.setExcluded"
@@ -207,7 +217,7 @@ fn missing_sets(detail: &ActivityView) -> Option<&'static str> {
 
 /// The sets of a strength workout: why there are none yet, then a card per exercise (sets the user added may be there
 /// even when the watch's are not), an exercise's ending with the way to add a set the watch did not record.
-fn sets(ui: &mut Ui, detail: &ActivityView, editing: &mut Option<SetEdit>, action: &mut Option<Action>) {
+fn sets(ui: &mut Ui, detail: &ActivityView, progress: &[ProgressItemView], editing: &mut Option<SetEdit>, action: &mut Option<Action>) {
     if let Some(text) = missing_sets(detail) {
         widgets::hint(ui, text);
     }
@@ -215,7 +225,7 @@ fn sets(ui: &mut Ui, detail: &ActivityView, editing: &mut Option<SetEdit>, actio
     for group in &detail.groups {
         let border = if group.exercise.is_some() { t.border } else { t.warning };
         widgets::card_with_border(ui, border, |ui| {
-            card_header(ui, &t, group, action);
+            card_header(ui, &t, group, can_add(progress, group, detail.summary.id), action);
             table(ui, &t, group, editing, action);
             // A set has an exercise: the sets without one have no "+ Add set".
             if group.exercise.is_some() {
@@ -243,9 +253,16 @@ fn is_cyrillic(c: char) -> bool {
     matches!(c, '\u{0400}'..='\u{052F}')
 }
 
+/// The exercise of `group` when it can take more weight and `activity` is its latest session: the advice is about the next
+/// one, so an earlier workout of the exercise has no line for it.
+fn can_add<'a>(progress: &'a [ProgressItemView], group: &ExerciseGroupView, activity: ActivityId) -> Option<&'a ProgressItemView> {
+    let exercise = group.exercise.as_ref()?;
+    progress.iter().find(|item| item.exercise.id == exercise.id && item.advice.kind == AdviceKind::Add && item.last.activity_id == activity)
+}
+
 /// The name of the card's exercise, or "No exercise" in the warning colour with the way to name it; on the right, the
-/// plan its sets followed.
-fn card_header(ui: &mut Ui, t: &Tokens, group: &ExerciseGroupView, action: &mut Option<Action>) {
+/// plan its sets followed. Under them, when `advice` is given, the line that leads to the exercise on Progress.
+fn card_header(ui: &mut Ui, t: &Tokens, group: &ExerciseGroupView, advice: Option<&ProgressItemView>, action: &mut Option<Action>) {
     // A line of text, unless the button makes it a row of controls.
     let sides = if group.exercise.is_some() { Sides::new().height(ui.text_style_height(&TextStyle::Body)) } else { Sides::new() };
     sides.shrink_left().truncate().show(
@@ -266,6 +283,12 @@ fn card_header(ui: &mut Ui, t: &Tokens, group: &ExerciseGroupView, action: &mut 
             }
         },
     );
+    if let Some(item) = advice {
+        let text = format!("{} · {}", can_add_title(&item.advice), tl!("open progress"));
+        if widgets::advice_link(ui, &text).clicked() {
+            *action = Some(Action::Progress(item.exercise.id.clone()));
+        }
+    }
 }
 
 /// `plan 4 × 8 · 80 kg`: the plan every recorded set of the card followed, with how many sets the watch recorded by it.

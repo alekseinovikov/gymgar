@@ -13,6 +13,11 @@
 //! The activity open beside the list is read (`activity.get`) when the selection changes, and again only when something
 //! may have changed it (Ruling 5): a command, the end of a job, another process writing to the database, or its line in
 //! the list changing while a sync streams in (its file arrived). Opening a new one takes its mark off (`activity.markSeen`).
+//!
+//! Progress is read with the activities (`progress.list`, on every refresh), and the exercise open on it (`progress.get`)
+//! when its key changes and when something may have changed it, with the same signals as the open activity, but not on
+//! every refresh: a sync streaming in refreshes the tiles after each frame that applied events of the job (a page of the
+//! list, a file), not on every frame, and the open exercise waits for its end.
 
 use std::time::{Duration, Instant};
 
@@ -21,14 +26,14 @@ use egui::{CentralPanel, Frame, Margin, ScrollArea};
 use gymgar_domain::{ConnectionStatus, Language};
 use gymgar_engine::{
     ActivityListItemView, ActivityListView, ActivityView, Caller, CommandKind, EngineError, GarminAuthError, GarminStatusView, JobEvent, JobFinished, JobId,
-    Outcome, Session, commands,
+    Outcome, ProgressItemView, ProgressListView, ProgressView, Session, commands,
 };
 use serde_json::{Map, Value};
 
 use crate::i18n;
-use crate::state::{Section, UiState};
+use crate::state::{ListFilter, Section, UiState};
 use crate::theme::{Tokens, metrics};
-use crate::{activities_ui, rail, settings_ui, summary_ui, tl, widgets};
+use crate::{activities_ui, progress_ui, rail, settings_ui, summary_ui, tl, widgets};
 
 /// How often the window looks at the database for changes another process (the CLI, an agent) has made.
 const STORE_POLL: Duration = Duration::from_secs(1);
@@ -38,6 +43,10 @@ const LIST_PAGE: u32 = 1000;
 /// ...and at most this many pages: a hundred thousand activities, decades of daily training. A database that holds more
 /// is not one this window can show whole, and it stops there instead of reading without end.
 const LIST_MAX_PAGES: u32 = 100;
+
+/// `progress.list` gives at most this many tiles at once. The answer is not paged: an exercise list this long is not one a
+/// person has, and a full answer is only noted in the log.
+const PROGRESS_LIMIT: u32 = 1000;
 
 /// Where the start-up import stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +87,18 @@ pub struct GymgarApp {
     /// How many times the open activity was read: the tests check it is not read on every frame.
     #[cfg(test)]
     pub(crate) detail_reads: usize,
+    /// The exercises with strength history, as `progress.list` last answered, in the order the tiles are shown.
+    progress: Vec<ProgressItemView>,
+    /// The open exercise, as `progress.get` last answered for `progress_detail_for`; `None` when none is open or it could
+    /// not be read.
+    progress_detail: Option<ProgressView>,
+    /// Why the open exercise could not be read, in the user's language.
+    progress_detail_error: Option<String>,
+    /// The key `progress_detail` was read for: when `ui.progress.open` is another, the exercise is read again.
+    progress_detail_for: Option<String>,
+    /// How many times the open exercise was read: the tests check it is not read on every frame.
+    #[cfg(test)]
+    pub(crate) progress_detail_reads: usize,
     /// The interface language the user chose (which may be "system").
     language: Language,
     system_locale: Option<String>,
@@ -116,6 +137,12 @@ impl GymgarApp {
             detail_for: None,
             #[cfg(test)]
             detail_reads: 0,
+            progress: Vec::new(),
+            progress_detail: None,
+            progress_detail_error: None,
+            progress_detail_for: None,
+            #[cfg(test)]
+            progress_detail_reads: 0,
             language: Language::System,
             system_locale,
             shown_lang: None,
@@ -125,6 +152,8 @@ impl GymgarApp {
             startup: Startup::Pending,
         };
         app.refresh();
+        // An exercise left open by the last run is read now, since no screen has asked for it yet.
+        app.refresh_progress_detail(false);
         app
     }
 
@@ -153,6 +182,14 @@ impl GymgarApp {
             return;
         }
         let t = Tokens::get(ui.ctx());
+        if self.ui.section == Section::Progress {
+            // The tiles and the exercise page take the whole width, not a screen's column; the tiles scroll on their own.
+            CentralPanel::default().frame(Frame::new().fill(t.bg).inner_margin(Margin::same(metrics::SCREEN_MARGIN))).show(ui, |ui| {
+                self.banner(ui);
+                progress_ui::show(self, ui);
+            });
+            return;
+        }
         CentralPanel::default().frame(Frame::new().fill(t.bg).inner_margin(Margin::same(metrics::SCREEN_MARGIN))).show(ui, |ui| {
             self.banner(ui);
             // The window may be low (the minimum is 500 points), so a long screen scrolls.
@@ -163,7 +200,7 @@ impl GymgarApp {
                     Section::Summary => summary_ui::show(self, ui),
                     Section::Settings => settings_ui::show(self, ui),
                     // Drawn above, beside the rail.
-                    Section::Activities => {}
+                    Section::Activities | Section::Progress => {}
                 }
             });
         });
@@ -195,6 +232,7 @@ impl GymgarApp {
         if commands::find(id).is_some_and(|spec| spec.kind != CommandKind::Query) {
             self.refresh();
             self.refresh_detail(true);
+            self.refresh_progress_detail(true);
         }
         Ok(outcome)
     }
@@ -242,6 +280,7 @@ impl GymgarApp {
         if changed {
             self.refresh();
             self.refresh_detail(detail_stale);
+            self.refresh_progress_detail(detail_stale);
         }
         if let Some(text) = failure {
             self.report(text);
@@ -294,6 +333,36 @@ impl GymgarApp {
         if let Err(text) = self.run("activity.markSeen", Value::Object(params)) {
             self.report(&text);
         }
+    }
+
+    /// The exercises with strength history, as of the last refresh, in the order the tiles are shown.
+    pub fn progress(&self) -> &[ProgressItemView] {
+        &self.progress
+    }
+
+    /// The open exercise, as last read; `None` when none is open or it could not be read.
+    pub(crate) fn progress_detail(&self) -> Option<&ProgressView> {
+        self.progress_detail.as_ref()
+    }
+
+    /// Why the open exercise could not be read, in the user's language.
+    pub(crate) fn progress_detail_error(&self) -> Option<&str> {
+        self.progress_detail_error.as_deref()
+    }
+
+    /// Opens the page of the exercise `key` (`progress.get`) at once, or closes the open one with `None`.
+    pub(crate) fn open_exercise(&mut self, key: Option<String>) {
+        self.ui.progress.open = key;
+        self.read_progress_detail();
+    }
+
+    /// Opens the activity `id` in Activities, from a session or a point of an exercise's page: the whole list, the activity
+    /// selected and read, its "new" mark taken off as when the list selects it. The exercise open on Progress stays open.
+    pub(crate) fn open_activity(&mut self, id: i64) {
+        self.ui.section = Section::Activities;
+        self.ui.activities.filter = ListFilter::All;
+        self.ui.activities.selected = Some(id);
+        self.open_selected();
     }
 
     /// The interface language the user chose, which may be "system".
@@ -376,6 +445,37 @@ impl GymgarApp {
             Ok(activities) => self.activities = activities,
             Err(text) => self.error = Some(text),
         }
+        match self.read_progress() {
+            Ok(progress) => {
+                self.progress = progress;
+                // Only a list that was read can say the open exercise is gone; one that was not says nothing.
+                if self.ui.progress.open.as_ref().is_some_and(|key| !self.progress.iter().any(|item| item.exercise.id == *key)) {
+                    self.ui.progress.open = None;
+                }
+            }
+            Err(text) => self.error = Some(text),
+        }
+    }
+
+    /// Every exercise with strength history: `progress.list` in one answer.
+    fn read_progress(&mut self) -> Result<Vec<ProgressItemView>, String> {
+        let mut params = Map::new();
+        params.insert("limit".to_owned(), Value::from(PROGRESS_LIMIT));
+        let items = match self.run("progress.list", Value::Object(params))? {
+            Outcome::Done(value) => {
+                serde_json::from_value::<ProgressListView>(value)
+                    .map_err(|error| {
+                        log::error!("cannot read the answer of progress.list: {error}");
+                        tl!("Something went wrong. Please try again.").to_owned()
+                    })?
+                    .items
+            }
+            Outcome::Started(_) => return Err(tl!("Something went wrong. Please try again.").to_owned()),
+        };
+        if items.len() >= PROGRESS_LIMIT as usize {
+            log::warn!("progress.list gave all {PROGRESS_LIMIT} it can at once; the window shows these");
+        }
+        Ok(items)
     }
 
     /// Every activity, newest first: `activity.list` page by page, until a page comes back short.
@@ -415,6 +515,42 @@ impl GymgarApp {
         let changed = self.detail.as_ref().is_some_and(|detail| self.activities.iter().find(|item| item.id.0 == id) != Some(&detail.summary));
         if force || changed {
             self.read_detail();
+        }
+    }
+
+    /// Reads the open exercise again when it may be stale: always with `force` (a command ran, a job ended, another process
+    /// wrote), else only when `ui.progress.open` is not the key it was read for (the user opened another, or the refresh
+    /// closed one that is gone). Nothing is read while none is open.
+    fn refresh_progress_detail(&mut self, force: bool) {
+        if self.ui.progress.open != self.progress_detail_for || (force && self.ui.progress.open.is_some()) {
+            self.read_progress_detail();
+        }
+    }
+
+    /// Reads the exercise `ui.progress.open` names (`progress.get`); none when none is open.
+    fn read_progress_detail(&mut self) {
+        let open = self.ui.progress.open.clone();
+        self.progress_detail_for = open.clone();
+        self.progress_detail = None;
+        self.progress_detail_error = None;
+        let Some(key) = open else { return };
+        #[cfg(test)]
+        {
+            self.progress_detail_reads += 1;
+        }
+        let mut params = Map::new();
+        params.insert("exercise".to_owned(), Value::from(key));
+        let read = match self.run("progress.get", Value::Object(params)) {
+            Ok(Outcome::Done(value)) => serde_json::from_value::<ProgressView>(value).map_err(|error| {
+                log::error!("cannot read the answer of progress.get: {error}");
+                tl!("Something went wrong. Please try again.").to_owned()
+            }),
+            Ok(Outcome::Started(_)) => Err(tl!("Something went wrong. Please try again.").to_owned()),
+            Err(text) => Err(text),
+        };
+        match read {
+            Ok(detail) => self.progress_detail = Some(detail),
+            Err(text) => self.progress_detail_error = Some(text),
         }
     }
 

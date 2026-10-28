@@ -7,7 +7,14 @@
 //! ```
 //!
 //! Without `GYMGAR_SNAPSHOTS` it writes nothing. It draws the real app (its `logic` and `ui`), 1200x800 points at a
-//! scale of 2, in English and in Russian: `<state>-en.png` and `<state>-ru.png`. The Activities screen and the Summary
+//! scale of 2, in English and in Russian: `<state>-en.png` and `<state>-ru.png`. `progress-*` is the Progress section, each
+//! at the smallest window too (800x500, `-800`): the tiles of every status (`progress-tiles`, and `-800-tall` with every
+//! tile in view at the narrow width), with a chip chosen (`progress-add`, `progress-break-filter`) and with nothing to
+//! show (`progress-empty`, and `progress-empty-not-connected`). `progress-detail-<state>` is the page of an exercise (`add`,
+//! `hold`, `after-break`, `bodyweight`, `break`), also as a narrow window as tall as the page (`-800-tall`);
+//! `progress-detail-programs` the same with programs named, `progress-detail-bodyweight-weighted` the bodyweight advice
+//! over a chart of weights (the exercise had one before). `summary-can-add*` is the Summary with the card of what can
+//! take more weight and `detail-can-add*` an open workout whose exercise can. The Activities screen and the Summary
 //! with activities are drawn at the smallest window too, 800x500: `<state>-800-<lang>.png`; so is the open activity
 //! (`detail-*`): a strength workout with corrections, another activity, and the three states without sets; and the
 //! correcting of it (`edit-*`): the line of a set open in the editor, its error, and the exercise picker.
@@ -24,14 +31,17 @@ use gymgar_domain::{
     SyncErrorKind,
 };
 use gymgar_engine::GarminAuthError;
-use gymgar_engine::testing::{FakeGarminSession, TestConfig};
+use gymgar_engine::testing::{FakeGarminSession, TestConfig, strength_set};
 use gymgar_store::{FileOutcome, NewActivity, Store};
 use serde_json::{Value, json};
 
 use crate::activity_detail_ui::exercise_name;
 use crate::i18n::Lang;
-use crate::test_support::{WINDOW, app_connected, app_in, app_seeded, builder, click, listed, pick, store_activities, tick, type_key, working_connection};
-use crate::{GymgarApp, Section, StartupErrorApp};
+use crate::test_support::{
+    WINDOW, app_connected, app_in, app_on_store, app_seeded, app_with_workouts, builder, click, listed, pick, progress_now, seed_titled_workout,
+    store_activities, tick, type_key, working_connection,
+};
+use crate::{GymgarApp, ProgressFilter, Section, StartupErrorApp};
 
 /// The environment variable that names the directory the PNGs go to.
 const DIRECTORY_VARIABLE: &str = "GYMGAR_SNAPSHOTS";
@@ -59,14 +69,22 @@ fn window(app: GymgarApp, section: Section) -> Shot {
 
 /// A window running the real app, `size` points large.
 fn window_sized(app: GymgarApp, section: Section, size: egui::Vec2) -> Shot {
-    let mut harness: Shot = builder().with_size(size).with_pixels_per_point(SCALE).wgpu().build_eframe(move |_| app);
+    let mut harness = eframe_window(app, size);
     harness.state_mut().ui.section = section;
     harness.run();
     harness
 }
 
+/// The real app in a window of `size` points, not yet drawn.
+fn eframe_window(app: GymgarApp, size: egui::Vec2) -> Shot {
+    builder().with_size(size).with_pixels_per_point(SCALE).wgpu().build_eframe(move |_| app)
+}
+
 /// The two window sizes of the Activities screen: the start window and the smallest one.
 const SIZES: [(egui::Vec2, &str); 2] = [(WINDOW, ""), (egui::vec2(800.0, 500.0), "-800")];
+
+/// The sizes of the page of an exercise: [`SIZES`], and a narrow window as tall as the whole page.
+const DETAIL_SIZES: [(egui::Vec2, &str); 3] = [SIZES[0], SIZES[1], (egui::vec2(800.0, 1150.0), "-800-tall")];
 
 /// Activities that look like a real history: two weeks of strength workouts and runs, two of them not opened yet, on top
 /// of the engine's fixtures (whose names are scrubbed to their types). The last sync ended an hour ago.
@@ -171,6 +189,153 @@ fn detail_app(lang: Lang) -> (GymgarApp, gymgar_engine::testing::TestHandles) {
     (app, handles)
 }
 
+/// One exercise of the history Progress is drawn from: what it is called on the watch, and its sessions as (days before
+/// the clock, weight, the reps of each set at that weight). The program asked for `plan` reps (none: it asked for nothing).
+struct Lift {
+    exercise: ExerciseId,
+    title: &'static str,
+    plan: Option<u32>,
+    sessions: &'static [(i64, f64, &'static [u32])],
+}
+
+const fn lift(exercise: ExerciseId, title: &'static str, plan: Option<u32>, sessions: &'static [(i64, f64, &'static [u32])]) -> Lift {
+    Lift { exercise, title, plan, sessions }
+}
+
+const fn exercise(category: u16, name: Option<u16>) -> ExerciseId {
+    ExerciseId { category, name }
+}
+
+/// Eleven exercises that look like half a year of training, one for each way a tile looks: three that can add weight, two
+/// to hold (the second with a name too long for its tile), one after a break, bodyweight, no target, a break, and two nobody
+/// has done for months (the older one more than a year, with no chart left). An exercise comes back every three weeks or so,
+/// as a program's does, so the only breaks on a chart (more than four weeks) are the ones meant: two in the history of the
+/// row and of the leg curl, and the one the flye, the curl and the lateral raise are on now.
+fn lifts() -> [Lift; 11] {
+    [
+        lift(
+            exercise(8, Some(23)),
+            "Румынская становая тяга",
+            Some(10),
+            &[
+                (189, 40.0, &[10]),
+                (168, 45.0, &[10]),
+                (147, 50.0, &[10]),
+                (126, 55.0, &[10]),
+                (105, 55.0, &[10]),
+                (84, 60.0, &[10]),
+                (63, 65.0, &[10]),
+                (42, 65.0, &[10]),
+                (24, 70.0, &[10, 10]),
+                (10, 70.0, &[10, 10]),
+            ],
+        ),
+        lift(
+            exercise(24, None),
+            "Жим гантелей над головой",
+            Some(10),
+            &[
+                (147, 40.0, &[10]),
+                (126, 42.0, &[10]),
+                (105, 44.0, &[10]),
+                (84, 46.0, &[10]),
+                (63, 46.0, &[10]),
+                (42, 46.0, &[10]),
+                (21, 48.0, &[10]),
+                (9, 48.0, &[10]),
+            ],
+        ),
+        lift(
+            exercise(28, None),
+            "Приседание со штангой",
+            Some(10),
+            &[
+                (189, 60.0, &[10]),
+                (168, 65.0, &[10]),
+                (147, 70.0, &[10]),
+                (126, 75.0, &[10]),
+                (105, 80.0, &[10]),
+                (84, 85.0, &[10]),
+                (63, 85.0, &[10]),
+                (42, 90.0, &[10]),
+                (22, 90.0, &[10]),
+                (8, 90.0, &[10]),
+            ],
+        ),
+        lift(
+            exercise(0, Some(1)),
+            "Жим штанги лёжа",
+            Some(10),
+            &[
+                (147, 85.0, &[10]),
+                (126, 85.0, &[10]),
+                (105, 90.0, &[10]),
+                (84, 90.0, &[10]),
+                (63, 95.0, &[10]),
+                (42, 95.0, &[10]),
+                (21, 95.0, &[10]),
+                (9, 95.0, &[8, 8, 6]),
+            ],
+        ),
+        lift(
+            exercise(23, None),
+            "Тяга штанги в наклоне",
+            Some(10),
+            &[(130, 55.0, &[10]), (90, 60.0, &[8]), (45, 60.0, &[8]), (20, 60.0, &[8]), (6, 60.0, &[10])],
+        ),
+        lift(exercise(21, None), "Подтягивания", Some(10), &[(85, 0.0, &[8]), (64, 0.0, &[9]), (43, 0.0, &[10]), (22, 0.0, &[11]), (6, 0.0, &[12])]),
+        lift(
+            exercise(30, None),
+            "Разгибание рук на трицепс с канатной рукоятью на верхнем блоке стоя",
+            None,
+            &[(69, 22.5, &[12]), (48, 25.0, &[12]), (27, 27.5, &[12]), (11, 30.0, &[12])],
+        ),
+        lift(exercise(15, None), "Сгибание ног лёжа", Some(10), &[(130, 40.0, &[10]), (100, 40.0, &[10]), (6, 30.0, &[8])]),
+        lift(exercise(9, None), "Разведение гантелей лёжа", Some(12), &[(104, 14.0, &[12]), (83, 14.0, &[12]), (62, 16.0, &[12]), (44, 16.0, &[12])]),
+        lift(exercise(7, None), "Сгибание рук со штангой", Some(10), &[(300, 25.0, &[10]), (260, 27.5, &[10]), (210, 30.0, &[10])]),
+        lift(exercise(14, None), "Подъём гантелей в стороны", Some(15), &[(440, 8.0, &[15]), (420, 8.0, &[15])]),
+    ]
+}
+
+/// A window on the history of [`lifts`]: Garmin connected, "today" 2026-10-27.
+fn progress_app(lang: Lang) -> (GymgarApp, gymgar_engine::testing::TestHandles) {
+    let now = progress_now();
+    let store = Store::open_in_memory().expect("an in-memory store");
+    for (id, (lift, days, kg, reps)) in
+        (7_300_001_i64..).zip(lifts().iter().flat_map(|lift| lift.sessions.iter().map(move |(days, kg, reps)| (lift, days, kg, reps))))
+    {
+        let sets = reps.iter().enumerate().map(|(index, reps)| strength_set(u16::try_from(index).unwrap_or(0), lift.exercise, *kg, *reps, lift.plan)).collect();
+        seed_titled_workout(&store, id, now - TimeDelta::days(*days) - TimeDelta::hours(6), sets, vec![(lift.exercise, lift.title.to_owned())]);
+    }
+    app_on_store(lang, store)
+}
+
+/// The open workout that points to the advice: Romanian deadlifts of 70 kg for the 10 reps asked, twice, so they can add
+/// weight, and bench presses that went from 90 kg to 95 kg and 8 reps, which hold. Both are in the two workouts, the latter
+/// being the one to open (activity `ADVICE_WORKOUT`).
+const ADVICE_WORKOUT: i64 = 7_400_002;
+
+fn advice_workout_app(lang: Lang) -> (GymgarApp, gymgar_engine::testing::TestHandles) {
+    let now = progress_now();
+    let store = Store::open_in_memory().expect("an in-memory store");
+    let deadlift = exercise(8, Some(23));
+    let bench = exercise(0, Some(1));
+    let titles = || vec![(deadlift, "Румынская становая тяга".to_owned()), (bench, "Жим штанги лёжа".to_owned())];
+    let workout = |days: i64, bench_kg: f64, bench_reps: u32| {
+        vec![
+            strength_set(0, deadlift, 70.0, 10, Some(10)),
+            strength_set(1, deadlift, 70.0, 10, Some(10)),
+            strength_set(2, bench, bench_kg, bench_reps, Some(10)),
+            strength_set(3, bench, bench_kg, bench_reps, Some(10)),
+        ]
+        .into_iter()
+        .map(move |set| RecordedSet { start: now - TimeDelta::days(days) + TimeDelta::minutes(i64::from(set.message_index) * 4), ..set })
+    };
+    seed_titled_workout(&store, ADVICE_WORKOUT - 1, now - TimeDelta::days(24), workout(24, 90.0, 10).collect(), titles());
+    seed_titled_workout(&store, ADVICE_WORKOUT, now - TimeDelta::days(3), workout(3, 95.0, 8).collect(), titles());
+    app_on_store(lang, store)
+}
+
 /// A Garmin that lists `count` strength workouts and sends a broken file for each: a sync with plenty of files to count.
 fn garmin_with_files(count: i64) -> Arc<FakeGarminSession> {
     let garmin = Arc::new(FakeGarminSession::new());
@@ -220,6 +385,82 @@ fn render_snapshots() {
         // 1. The first run: an empty Summary with the invitation.
         let (app, _handles) = app_in(lang, on_hold());
         save(&mut window(app, Section::Summary), &directory, "summary-empty", lang);
+        // The Progress section: the tiles of every status at both sizes, with a chip chosen, and with nothing to show
+        // (connected, and before the connection).
+        for (size, suffix) in SIZES {
+            let (app, _handles) = progress_app(lang);
+            save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-tiles{suffix}"), lang);
+            let (mut app, _handles) = progress_app(lang);
+            app.ui.progress.filter = ProgressFilter::Add;
+            save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-add{suffix}"), lang);
+            let (app, _handles) = app_on_store(lang, Store::open_in_memory().expect("an in-memory store"));
+            save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-empty{suffix}"), lang);
+        }
+        // Every tile in view at the narrow width (two columns), the long name among them, and the chip of the breaks.
+        let (app, _handles) = progress_app(lang);
+        save(&mut window_sized(app, Section::Progress, egui::vec2(800.0, 1000.0)), &directory, "progress-tiles-800-tall", lang);
+        let (mut app, _handles) = progress_app(lang);
+        app.ui.progress.filter = ProgressFilter::Break;
+        save(&mut window(app, Section::Progress), &directory, "progress-break-filter", lang);
+        let (app, _handles) = app_in(lang, on_hold());
+        save(&mut window(app, Section::Progress), &directory, "progress-empty-not-connected", lang);
+        // The Summary with the card of the exercises that can take more weight (three of eleven), at both sizes; and the open
+        // workout whose deadlift can, with the bench press of the same workout holding, so one card has the line and one has not.
+        for (size, suffix) in SIZES {
+            let (app, _handles) = progress_app(lang);
+            save(&mut window_sized(app, Section::Summary, size), &directory, &format!("summary-can-add{suffix}"), lang);
+            let (mut app, _handles) = advice_workout_app(lang);
+            app.ui.activities.selected = Some(ADVICE_WORKOUT);
+            save(&mut window_sized(app, Section::Activities, size), &directory, &format!("detail-can-add{suffix}"), lang);
+        }
+        // The page of an exercise: one that can add weight, one with circles and two shaded breaks, one that came back after a
+        // break, one with no weight (a chart of reps) and one on a break that is going on; at both sizes, and in a tall
+        // narrow window that shows the whole page (the chart's axes and the sessions) at the narrow width.
+        for (state, title) in [
+            ("add", "Румынская становая тяга"),
+            ("hold", "Тяга штанги в наклоне"),
+            ("after-break", "Сгибание ног лёжа"),
+            ("bodyweight", "Подтягивания"),
+            ("break", "Сгибание рук со штангой"),
+        ] {
+            for (size, suffix) in DETAIL_SIZES {
+                let (mut app, _handles) = progress_app(lang);
+                let key = app.progress().iter().find(|item| item.exercise.watch_title.as_deref() == Some(title)).map(|item| item.exercise.id.clone());
+                app.open_exercise(Some(key.expect("a tile of this exercise")));
+                save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-detail-{state}{suffix}"), lang);
+            }
+        }
+
+        // The same page with programs named and every session in view: a tall window, wide and narrow.
+        for (size, suffix) in [(egui::vec2(1200.0, 1150.0), ""), (egui::vec2(800.0, 1150.0), "-800")] {
+            let squat = ExerciseId { category: 28, name: None };
+            let sets = |kg: f64, reps: u32| vec![strength_set(0, squat, kg, reps, Some(10))];
+            let workouts = vec![
+                ("2026-07-06 08:00:00", Some("Legs"), sets(70.0, 10)),
+                ("2026-07-27 08:00:00", Some("Legs"), sets(70.0, 10)),
+                ("2026-08-17 08:00:00", Some("Legs, heavy day with the long finisher on the sled"), sets(75.0, 10)),
+                ("2026-09-07 08:00:00", Some("Legs"), sets(75.0, 10)),
+                ("2026-09-28 08:00:00", Some("Legs"), vec![strength_set(0, squat, 80.0, 10, Some(10)), strength_set(1, squat, 90.0, 6, Some(10))]),
+                ("2026-10-20 08:00:00", Some("Legs"), vec![strength_set(0, squat, 80.0, 10, Some(10)), strength_set(1, squat, 80.0, 10, Some(10))]),
+                ("2026-10-24 08:00:00", Some("Legs"), sets(80.0, 10)),
+            ];
+            let (mut app, _handles) = app_with_workouts(lang, &workouts);
+            app.open_exercise(Some("squat".to_owned()));
+            save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-detail-programs{suffix}"), lang);
+        }
+
+        // An exercise that had a weight and whose last session had none: the advice is that of bodyweight, the chart is of weights.
+        for (size, suffix) in SIZES {
+            let squat = ExerciseId { category: 28, name: None };
+            let workouts = vec![
+                ("2026-08-17 08:00:00", Some("Legs"), vec![strength_set(0, squat, 75.0, 10, Some(10))]),
+                ("2026-09-07 08:00:00", Some("Legs"), vec![strength_set(0, squat, 75.0, 10, Some(10))]),
+                ("2026-10-20 08:00:00", Some("Legs"), vec![strength_set(0, squat, 0.0, 12, Some(10))]),
+            ];
+            let (mut app, _handles) = app_with_workouts(lang, &workouts);
+            app.open_exercise(Some("squat".to_owned()));
+            save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-detail-bodyweight-weighted{suffix}"), lang);
+        }
 
         // 2. Settings before connecting, with the key typed and Garmin's refusal under the form.
         let cfg = TestConfig { garmin: Err(GarminAuthError::KeyRejected), ..on_hold() };
@@ -301,7 +542,7 @@ fn render_snapshots() {
             let (mut app, handles) = app_seeded(lang, cfg.clone(), true, |store| history(store, cfg.now));
             app.run("garmin.sync", Value::Null).expect("start a sync");
             handles.spawner.expect("a deferred spawner").run_pending();
-            let mut harness: Shot = builder().with_size(size).with_pixels_per_point(SCALE).wgpu().build_eframe(move |_| app);
+            let mut harness = eframe_window(app, size);
             harness.state_mut().ui.section = Section::Activities;
             harness.step();
             save(&mut harness, &directory, &format!("activities-loading{suffix}"), lang);

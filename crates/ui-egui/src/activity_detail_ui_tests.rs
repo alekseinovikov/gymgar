@@ -6,7 +6,9 @@ use egui::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use gymgar_domain::{ActivityId, ExerciseId, Mass, PlannedTarget, RecordedSet, Reps, STRENGTH_TYPE_KEY};
-use gymgar_engine::testing::{FIXTURE_STRENGTH_ZIP, FakeGarminSession, TestConfig, connection_at, save_connection, seed_strength, test_session_on};
+use gymgar_engine::testing::{
+    FIXTURE_STRENGTH_ZIP, FakeGarminSession, TestConfig, connection_at, save_connection, seed_strength, strength_set, test_session_on,
+};
 use gymgar_engine::{Caller, ExerciseView, SecretStore};
 use gymgar_store::{FileOutcome, Store};
 use secrecy::SecretString;
@@ -16,7 +18,7 @@ use super::*;
 use crate::app::Startup;
 use crate::i18n::{self, Lang};
 use crate::state::Section;
-use crate::test_support::{TEST_LOCALE, app_seeded, app_seeded_with, click, harness_sized, listed, pick, store_activities, tick};
+use crate::test_support::{TEST_LOCALE, app_seeded, app_seeded_with, app_with_workouts, click, harness_sized, listed, pick, store_activities, tick};
 use crate::{GymgarApp, UiState};
 
 /// The Romanian deadlift: the fixture's exercise with a title in Russian.
@@ -471,4 +473,82 @@ fn another_activity_opens_at_its_top() {
     // The other workout opens at its top, not where the first was left.
     select(&mut harness, second.0);
     assert!((heading(&harness).top() - top.top()).abs() < 0.5, "{:?}, expected the top at {}", heading(&harness), top.top());
+}
+
+const SQUAT: ExerciseId = ExerciseId { category: 28, name: None };
+const BENCH: ExerciseId = ExerciseId { category: 0, name: None };
+
+/// The workouts of 7,100,001 on: two squats of 80 kg for the 10 reps the program asked, so the squat can add weight (85 kg),
+/// and a third, the newest, with a bench press of 95 kg for 8 in it too, which holds.
+fn squat_and_bench() -> Vec<(&'static str, Option<&'static str>, Vec<RecordedSet>)> {
+    let lift = |index: u16, exercise: ExerciseId, kg: f64, reps: u32| strength_set(index, exercise, kg, reps, Some(10));
+    vec![
+        ("2026-10-20 07:55:00", Some("Legs"), vec![lift(0, SQUAT, 80.0, 10)]),
+        ("2026-10-24 07:55:00", Some("Legs"), vec![lift(0, SQUAT, 80.0, 10), lift(1, BENCH, 95.0, 8)]),
+    ]
+}
+
+/// The line an exercise that can add weight has in the card of its latest workout.
+fn points_to_progress(lang: Lang) -> &'static str {
+    pick(lang, "Can add: 85 kg · open progress", "Можно добавлять: 85 кг · открыть прогресс")
+}
+
+#[test]
+fn the_latest_workout_of_an_exercise_that_can_add_points_to_its_progress() {
+    for lang in Lang::ALL {
+        let (app, _handles) = app_with_workouts(lang, &squat_and_bench());
+        let mut harness = open_at(app, 7_100_002);
+        harness.get_by_role_and_label(Role::Link, points_to_progress(lang));
+        // One line, in the squat's card: the bench press of the same workout holds, so its card has none.
+        assert_eq!(harness.query_all_by_role_and_label(Role::Link, points_to_progress(lang)).count(), 1, "{lang:?}");
+        let (line, squat, bench) = (
+            harness.get_by_role_and_label(Role::Link, points_to_progress(lang)).rect(),
+            harness.get_by_label("Squat").rect(),
+            harness.get_by_label("Bench press").rect(),
+        );
+        assert!(squat.bottom() <= line.top() && line.bottom() <= bench.top(), "{lang:?}: under the name of the squat: {squat:?}, {line:?}, {bench:?}");
+
+        // The workout before it is not the latest of the squat: its advice is about the next one.
+        select(&mut harness, 7_100_001);
+        harness.get_by_label("Squat");
+        assert!(harness.query_by_role_and_label(Role::Link, points_to_progress(lang)).is_none(), "{lang:?}");
+    }
+}
+
+#[test]
+fn the_line_is_not_there_when_the_exercise_has_no_advice_to_add() {
+    for lang in Lang::ALL {
+        // One session of each: no advice yet. And a bench press that holds.
+        let only = &squat_and_bench()[1..];
+        let (app, _handles) = app_with_workouts(lang, only);
+        let harness = open_at(app, 7_100_001);
+        harness.get_by_label("Squat");
+        assert!(harness.query_by_label_contains(pick(lang, "open progress", "открыть прогресс")).is_none(), "{lang:?}");
+    }
+}
+
+#[test]
+fn the_line_opens_the_exercise_on_progress() {
+    for lang in Lang::ALL {
+        let (app, _handles) = app_with_workouts(lang, &squat_and_bench());
+        let mut harness = open_at(app, 7_100_002);
+        harness.get_by_role_and_label(Role::Link, points_to_progress(lang)).click();
+        harness.run();
+        let ui = &harness.state().ui;
+        assert_eq!((ui.section, ui.progress.open.as_deref()), (Section::Progress, Some("squat")), "{lang:?}");
+        // The page of the squat, with the way back.
+        harness.get_by_role_and_label(Role::Heading, "Squat");
+        harness.get_by_role_and_label(Role::Button, pick(lang, "Back", "Назад"));
+    }
+}
+
+#[test]
+fn the_line_goes_when_the_workout_is_left_out() {
+    let (app, _handles) = app_with_workouts(Lang::En, &squat_and_bench());
+    let mut harness = open_at(app, 7_100_002);
+    harness.get_by_role_and_label(Role::Link, points_to_progress(Lang::En));
+    // Left out of the statistics, the squat has one session, and no advice to add: its latest is the older workout.
+    click(&mut harness, "Don't count this workout");
+    assert!(harness.query_by_role_and_label(Role::Link, points_to_progress(Lang::En)).is_none());
+    harness.get_by_label("Squat");
 }

@@ -1,20 +1,25 @@
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use chrono::{TimeZone, Utc};
 use egui::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
-use gymgar_domain::{ActivityId, ConnectionStatus, Language, SecretBackend};
-use gymgar_engine::testing::{FakeGarminSession, RequestKind, TestConfig, connection_at, save_connection, test_session_on, test_session_with};
-use gymgar_engine::{Caller, EngineError, GarminAuthError, Outcome, SecretStore};
+use gymgar_domain::{ActivityId, ConnectionStatus, ExerciseId, Language, SecretBackend};
+use gymgar_engine::testing::{
+    FakeGarminSession, RequestKind, TestConfig, connection_at, save_connection, seed_workout, strength_set, test_session_on, test_session_with,
+};
+use gymgar_engine::{AdviceKind, Caller, EngineError, GarminAuthError, Outcome, SecretStore};
 use gymgar_store::Store;
 use secrecy::SecretString;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::Section;
 use crate::i18n::{self, Lang};
-use crate::test_support::{TEST_LOCALE, app, app_seeded, harness, listed, store_activities};
+use crate::state::{ListFilter, ProgressFilter, ProgressState};
+use crate::test_support::{TEST_LOCALE, app, app_seeded, harness, listed, store_activities, tick};
 use crate::theme::metrics;
+use crate::{Section, test_support};
 
 fn config(garmin: Result<(), GarminAuthError>, deferred: bool) -> TestConfig {
     TestConfig { garmin, deferred, ..TestConfig::default() }
@@ -50,7 +55,7 @@ fn rail_shows_summary_and_settings() {
 }
 
 #[test]
-fn the_rail_has_summary_and_activities_on_top_and_settings_at_the_bottom() {
+fn the_rail_has_summary_activities_and_progress_on_top_and_settings_at_the_bottom() {
     let (app, _handles) = app(TestConfig::default());
     let harness = harness(app);
     // The buttons of the rail only: the screen beside it has buttons of its own.
@@ -61,12 +66,15 @@ fn the_rail_has_summary_and_activities_on_top_and_settings_at_the_bottom() {
         .map(|button| (button.accesskit_node().label().unwrap_or_default(), button.rect()))
         .collect();
     let labels: Vec<_> = buttons.iter().map(|(label, _)| label.as_str()).collect();
-    assert_eq!(labels, ["Summary", "Activities", "Settings"], "{buttons:?}");
-    let (summary, activities, settings) = (buttons[0].1, buttons[1].1, buttons[2].1);
-    assert!(summary.top() < activities.top() && activities.top() < settings.top(), "Summary, then Activities, then Settings");
-    assert!(summary.top() < 100.0 && activities.top() < 150.0, "Summary and Activities sit at the top: {summary:?} {activities:?}");
+    assert_eq!(labels, ["Summary", "Activities", "Progress", "Settings"], "{buttons:?}");
+    let (summary, activities, progress, settings) = (buttons[0].1, buttons[1].1, buttons[2].1, buttons[3].1);
+    assert!(
+        summary.top() < activities.top() && activities.top() < progress.top() && progress.top() < settings.top(),
+        "Summary, Activities, Progress, then Settings"
+    );
+    assert!(progress.top() < 200.0, "Summary, Activities and Progress sit at the top: {summary:?} {activities:?} {progress:?}");
     assert!(settings.bottom() > 700.0, "Settings sits at the bottom of the 800 px window: {settings:?}");
-    assert_eq!((summary.left(), activities.left()), (settings.left(), settings.left()), "one column");
+    assert_eq!((summary.left(), activities.left(), progress.left()), (settings.left(), settings.left(), settings.left()), "one column");
     assert!(summary.right() < 100.0, "a narrow rail on the left: {summary:?}");
 }
 
@@ -791,4 +799,254 @@ fn a_screen_is_never_wider_than_a_small_window() {
     harness.run();
     let warning = harness.get_by_label_contains("Save the key to the file").rect();
     assert!(warning.right() <= 800.0 - f32::from(metrics::SCREEN_MARGIN), "the warning runs past the window: {warning:?}");
+}
+
+#[test]
+fn the_rail_has_a_progress_button_that_opens_the_section() {
+    for lang in [Lang::En, Lang::Ru] {
+        let (app, _handles) = test_support::app_in(lang, TestConfig::default());
+        let mut harness = harness(app);
+        let label = test_support::pick(lang, "Progress", "Прогресс");
+        assert_eq!(format!("{:?}", harness.get_by_role_and_label(Role::Button, label).accesskit_node().toggled()), "Some(False)", "{lang:?}");
+
+        test_support::click(&mut harness, label);
+        assert_eq!(harness.state().ui.section, Section::Progress, "{lang:?}");
+        assert_eq!(format!("{:?}", harness.get_by_role_and_label(Role::Button, label).accesskit_node().toggled()), "Some(True)", "{lang:?}");
+        // The section has its title (here there is nothing to show under it).
+        harness.get_by_role_and_label(Role::Heading, label);
+        // The rail is still there to go back by.
+        test_support::click(&mut harness, test_support::pick(lang, "Summary", "Сводка"));
+        assert_eq!(harness.state().ui.section, Section::Summary, "{lang:?}");
+    }
+}
+
+// What the progress tests read: "now" is 2026-10-27 12:00 UTC, so two weekly sessions are fresh.
+const BENCH_KEY: &str = "bench_press/barbell_bench_press";
+const BENCH: ExerciseId = ExerciseId { category: 0, name: Some(1) };
+const DEADLIFT_KEY: &str = "deadlift/romanian_deadlift";
+const DEADLIFT: ExerciseId = ExerciseId { category: 8, name: Some(23) };
+const FIRST: i64 = 7_000_001;
+const SECOND: i64 = 7_000_002;
+
+fn progress_config() -> TestConfig {
+    TestConfig { now: Utc.with_ymd_and_hms(2026, 10, 27, 12, 0, 0).single().expect("a valid time"), ..TestConfig::default() }
+}
+
+/// Two bench-press workouts a week apart, three sets of 100 kg for 5 with 5 asked for: the advice is to add weight.
+fn seed_bench(store: &Store) {
+    for (id, day) in [(FIRST, "2026-10-13"), (SECOND, "2026-10-20")] {
+        let sets = (0..3).map(|index| strength_set(index, BENCH, 100.0, 5, Some(5))).collect();
+        seed_workout(store, id, &format!("{day} 07:55:00"), 3, Some("Push"), sets);
+    }
+}
+
+fn all_three() -> Value {
+    json!([{ "recorded": 0 }, { "recorded": 1 }, { "recorded": 2 }])
+}
+
+fn advice_of(app: &GymgarApp, key: &str) -> Option<AdviceKind> {
+    app.progress().iter().find(|item| item.exercise.id == key).map(|item| item.advice.kind)
+}
+
+/// An app on a database file with the bench workouts in it, and the path of the file, which other sessions can open: they
+/// stand for another process (`gymgar-cli` serving an agent).
+fn app_on_a_file(dir: &tempfile::TempDir) -> (GymgarApp, PathBuf) {
+    let path = dir.path().join("gymgar.sqlite3");
+    let cfg = progress_config();
+    let store = Store::open(&path).expect("open the database");
+    seed_bench(&store);
+    let (session, _handles) = test_session_on(store, cfg.clone());
+    let mut app = GymgarApp::with_system_locale(session, UiState::default(), Some(TEST_LOCALE.to_owned())).with_time(cfg.now);
+    app.startup = Startup::Done;
+    // The first look at the database's version cannot tell what changed before it.
+    app.tick(&egui::Context::default());
+    (app, path)
+}
+
+/// Another process's session on the database at `path`.
+fn agent_on(path: &Path) -> Session {
+    test_session_on(Store::open(path).expect("open the database"), progress_config()).0
+}
+
+fn poll_now(app: &mut GymgarApp) {
+    app.next_store_poll = Instant::now();
+    app.tick(&egui::Context::default());
+}
+
+#[test]
+fn progress_is_read_with_the_activities() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let (mut app, path) = app_on_a_file(&dir);
+    // Read when the window opens, as the activities are.
+    assert_eq!(advice_of(&app, BENCH_KEY), Some(AdviceKind::Add));
+    assert_eq!(advice_of(&app, DEADLIFT_KEY), None);
+    assert!(!app.activities().is_empty());
+
+    // Another process saves a workout: the next look at the database shows its exercise.
+    let sets = (0..3).map(|index| strength_set(index, DEADLIFT, 60.0, 10, Some(10))).collect();
+    seed_workout(&Store::open(&path).expect("open the database"), 7_000_003, "2026-10-21 07:55:00", 3, Some("Pull"), sets);
+    poll_now(&mut app);
+    assert_eq!(advice_of(&app, DEADLIFT_KEY), Some(AdviceKind::Hold));
+    assert_eq!(advice_of(&app, BENCH_KEY), Some(AdviceKind::Add));
+}
+
+#[test]
+fn a_correction_refreshes_progress() {
+    let (mut app, _handles) = app_seeded(Lang::En, progress_config(), true, seed_bench);
+    assert_eq!(advice_of(&app, BENCH_KEY), Some(AdviceKind::Add));
+
+    // A heavier weight in the latest workout: the two are no longer at one weight, and the weight is held.
+    app.run("activity.editSets", json!({ "id": SECOND, "sets": all_three(), "weightKg": 102.5 })).expect("correct the weight");
+    assert_eq!(advice_of(&app, BENCH_KEY), Some(AdviceKind::Hold));
+    app.run("activity.resetSets", json!({ "id": SECOND, "sets": all_three() })).expect("take it back");
+    assert_eq!(advice_of(&app, BENCH_KEY), Some(AdviceKind::Add));
+    // Leaving a workout out of the statistics takes its session away.
+    app.run("activity.setExcluded", json!({ "id": SECOND, "excluded": true })).expect("exclude it");
+    assert_eq!(advice_of(&app, BENCH_KEY), Some(AdviceKind::Hold));
+}
+
+#[test]
+fn open_exercise_reads_its_detail() {
+    let (mut app, _handles) = app_seeded(Lang::En, progress_config(), true, seed_bench);
+    assert_eq!((app.progress_detail(), app.ui.progress.open.as_deref()), (None, None));
+
+    app.open_exercise(Some(BENCH_KEY.to_owned()));
+    assert_eq!(app.ui.progress.open.as_deref(), Some(BENCH_KEY));
+    let detail = app.progress_detail().expect("read at once");
+    assert_eq!(detail.exercise.id, BENCH_KEY);
+    assert_eq!(detail.sessions.len(), 2);
+    assert_eq!(detail.summary.as_ref().map(|summary| summary.advice.kind), Some(AdviceKind::Add));
+    assert_eq!(app.progress_detail_error(), None);
+
+    // Another exercise replaces it, and `None` closes it.
+    app.open_exercise(Some(DEADLIFT_KEY.to_owned()));
+    assert_eq!(app.progress_detail().map(|detail| detail.exercise.id.as_str()), Some(DEADLIFT_KEY));
+    app.open_exercise(None);
+    assert_eq!((app.progress_detail(), app.ui.progress.open.as_deref(), app.progress_detail_error()), (None, None, None));
+}
+
+#[test]
+fn the_open_exercise_is_read_again_only_when_it_may_have_changed() {
+    let (app, _handles) = app_seeded(Lang::En, progress_config(), true, seed_bench);
+    let mut harness = harness(app);
+    harness.state_mut().ui.section = Section::Progress;
+    harness.state_mut().open_exercise(Some(BENCH_KEY.to_owned()));
+    let reads = |harness: &egui_kittest::Harness<'_, GymgarApp>| harness.state().progress_detail_reads;
+    assert_eq!(reads(&harness), 1, "read once when it was opened");
+    // The first look at the database's version cannot tell what changed before it.
+    tick(&mut harness);
+    let opened = reads(&harness);
+    for _ in 0..5 {
+        harness.step();
+        tick(&mut harness);
+    }
+    assert_eq!(reads(&harness), opened, "frames and ticks with nothing new read nothing");
+
+    // A command that changes something: the exercise is read again, and shows it.
+    harness.state_mut().run("activity.editSets", json!({ "id": SECOND, "sets": all_three(), "weightKg": 102.5 })).expect("correct the weight");
+    assert_eq!(reads(&harness), opened + 1);
+    let kind = |harness: &egui_kittest::Harness<'_, GymgarApp>| {
+        harness.state().progress_detail().and_then(|detail| detail.summary.as_ref()).map(|summary| summary.advice.kind)
+    };
+    assert_eq!(kind(&harness), Some(AdviceKind::Hold));
+    for _ in 0..3 {
+        harness.step();
+        tick(&mut harness);
+    }
+    assert_eq!(reads(&harness), opened + 1);
+}
+
+#[test]
+fn an_agent_correcting_the_open_exercise_is_seen_within_a_second() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let (mut app, path) = app_on_a_file(&dir);
+    let mut agent = agent_on(&path);
+    app.open_exercise(Some(BENCH_KEY.to_owned()));
+    let kind = |app: &GymgarApp| app.progress_detail().and_then(|detail| detail.summary.as_ref()).map(|summary| summary.advice.kind);
+    assert_eq!(kind(&app), Some(AdviceKind::Add));
+
+    agent.execute("activity.editSets", json!({ "id": SECOND, "sets": all_three(), "weightKg": 102.5 }), Caller::Agent).expect("the agent corrects the weight");
+    poll_now(&mut app);
+    assert_eq!(kind(&app), Some(AdviceKind::Hold));
+    assert_eq!(advice_of(&app, BENCH_KEY), Some(AdviceKind::Hold));
+}
+
+#[test]
+fn an_open_exercise_that_is_no_longer_listed_is_closed_quietly() {
+    let (mut app, _handles) = app_seeded(Lang::En, progress_config(), true, seed_bench);
+    app.open_exercise(Some(BENCH_KEY.to_owned()));
+    // One workout is left: the exercise is still there.
+    app.run("activity.setExcluded", json!({ "id": FIRST, "excluded": true })).expect("exclude one");
+    assert_eq!(app.ui.progress.open.as_deref(), Some(BENCH_KEY));
+    assert!(app.progress_detail().is_some());
+    // None is left: nothing to open any more, and no banner about it.
+    app.run("activity.setExcluded", json!({ "id": SECOND, "excluded": true })).expect("exclude the other");
+    assert_eq!((app.ui.progress.open.as_deref(), app.progress_detail(), app.progress_detail_error()), (None, None, None));
+    assert_eq!(app.error(), None);
+    assert_eq!(advice_of(&app, BENCH_KEY), None);
+}
+
+#[test]
+fn a_saved_open_exercise_is_read_when_the_window_opens_and_a_missing_one_is_dropped() {
+    let open = |key: &str| {
+        let store = Store::open_in_memory().expect("an in-memory store");
+        seed_bench(&store);
+        let (session, _handles) = test_session_on(store, progress_config());
+        let ui = UiState { progress: ProgressState { filter: ProgressFilter::Add, open: Some(key.to_owned()) }, ..UiState::default() };
+        GymgarApp::with_system_locale(session, ui, Some(TEST_LOCALE.to_owned()))
+    };
+    let app = open(BENCH_KEY);
+    assert_eq!(app.progress_detail().map(|detail| detail.exercise.id.as_str()), Some(BENCH_KEY));
+    assert_eq!(app.ui.progress, ProgressState { filter: ProgressFilter::Add, open: Some(BENCH_KEY.to_owned()) });
+
+    // A key nobody has done (or none at all) opens nothing; the filter stays.
+    for key in [DEADLIFT_KEY, "not an exercise"] {
+        let app = open(key);
+        assert_eq!((app.progress_detail(), app.ui.progress.open.as_deref(), app.error()), (None, None, None), "{key}");
+        assert_eq!(app.ui.progress.filter, ProgressFilter::Add);
+    }
+}
+
+#[test]
+fn a_progress_list_that_cannot_be_read_keeps_the_last_one_and_says_so() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let (mut app, path) = app_on_a_file(&dir);
+    app.open_exercise(Some(BENCH_KEY.to_owned()));
+    assert_eq!(advice_of(&app, BENCH_KEY), Some(AdviceKind::Add));
+
+    // Another process damages the database: the table of the sets the user added disappears, and the history cannot be read.
+    rusqlite::Connection::open(&path).expect("open the file").execute("DROP TABLE added_set", []).expect("drop the table");
+    poll_now(&mut app);
+    assert_eq!(app.error(), Some("Gymgar could not access its data. Check that the disk is available and try again."));
+    assert_eq!(advice_of(&app, BENCH_KEY), Some(AdviceKind::Add), "the last list stays");
+    assert_eq!(app.ui.progress.open.as_deref(), Some(BENCH_KEY), "a list that could not be read does not close the exercise");
+}
+
+#[test]
+fn open_activity_switches_to_activities() {
+    let now = TestConfig::default().now;
+    let new = listed(9_000_000_000_001, "strength_training", Some("Upper A"), now - chrono::TimeDelta::hours(2), true);
+    let (mut app, _handles) = app_seeded(Lang::En, progress_config(), true, |store| {
+        seed_bench(store);
+        store_activities(store, &[new]);
+    });
+    app.ui.section = Section::Progress;
+    app.ui.activities.filter = ListFilter::Strength;
+    assert_eq!(app.status().map(|status| status.sync.new_count), Some(1));
+
+    app.open_activity(SECOND);
+    assert_eq!(app.ui.section, Section::Activities);
+    assert_eq!(app.ui.activities.filter, ListFilter::All);
+    assert_eq!(app.ui.activities.selected, Some(SECOND));
+    assert_eq!(app.detail().map(|detail| detail.summary.id), Some(ActivityId(SECOND)));
+
+    // An activity not opened before loses its "new" mark, as when the list selects it.
+    app.open_activity(9_000_000_000_001);
+    assert_eq!(app.detail().map(|detail| detail.summary.id), Some(ActivityId(9_000_000_000_001)));
+    assert_eq!(app.status().map(|status| status.sync.new_count), Some(0));
+    assert!(app.activities().iter().all(|item| !item.is_new));
+    // The exercise that was open on Progress stays open for the way back.
+    app.open_exercise(Some(BENCH_KEY.to_owned()));
+    app.open_activity(FIRST);
+    assert_eq!(app.ui.progress.open.as_deref(), Some(BENCH_KEY));
 }

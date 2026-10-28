@@ -10,17 +10,19 @@ use std::sync::{Arc, LazyLock};
 pub enum Icon {
     House,
     Dumbbell,
+    ChartLine,
     Settings,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 3] = [Icon::House, Icon::Dumbbell, Icon::Settings];
+    pub const ALL: [Icon; 4] = [Icon::House, Icon::Dumbbell, Icon::ChartLine, Icon::Settings];
 
     /// The address the image loaders know this icon by; it ends in `.svg`, which is how they pick the SVG loader.
     fn uri(self) -> &'static str {
         match self {
             Icon::House => "bytes://gymgar/icons/house.svg",
             Icon::Dumbbell => "bytes://gymgar/icons/dumbbell.svg",
+            Icon::ChartLine => "bytes://gymgar/icons/chart-line.svg",
             Icon::Settings => "bytes://gymgar/icons/settings.svg",
         }
     }
@@ -29,10 +31,12 @@ impl Icon {
     pub(crate) fn svg(self) -> Arc<[u8]> {
         static HOUSE: LazyLock<Arc<[u8]>> = LazyLock::new(|| white(include_str!("../../../assets/icons/house.svg")));
         static DUMBBELL: LazyLock<Arc<[u8]>> = LazyLock::new(|| white(include_str!("../../../assets/icons/dumbbell.svg")));
+        static CHART_LINE: LazyLock<Arc<[u8]>> = LazyLock::new(|| white(include_str!("../../../assets/icons/chart-line.svg")));
         static SETTINGS: LazyLock<Arc<[u8]>> = LazyLock::new(|| white(include_str!("../../../assets/icons/settings.svg")));
         match self {
             Icon::House => Arc::clone(&HOUSE),
             Icon::Dumbbell => Arc::clone(&DUMBBELL),
+            Icon::ChartLine => Arc::clone(&CHART_LINE),
             Icon::Settings => Arc::clone(&SETTINGS),
         }
     }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, Duration, Utc};
-use gymgar_domain::{ActivityId, AddedSet, ExerciseId, FileState, PlannedTarget, SetCorrection, SetRef, StrengthRecord};
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Utc};
+use gymgar_domain::{ActivityId, AddedSet, ExerciseId, FileState, PlannedTarget, Reps, SetCorrection, SetRef, StrengthRecord};
 use rusqlite::params_from_iter;
 
 use super::*;
@@ -296,7 +296,18 @@ fn the_stored_counts_the_filter_and_the_usage_agree() {
     let usage = store.exercise_usage().unwrap();
     assert_eq!(usage, HashMap::from([(deadlift(), 5), (squat(), 3), (curl(), 2), (category_only, 1)]));
     // Of the 13 sets that count, two (no exercise, unknown) are not an exercise.
-    assert_eq!(usage.values().sum::<u32>(), counted.values().map(|(sets, _)| sets).sum::<u32>() - 2);
+    let counted_sets: u32 = counted.values().map(|(sets, _)| sets).sum();
+    assert_eq!(usage.values().sum::<u32>(), counted_sets - 2);
+
+    // The history holds those same sets one by one: as many as the stored counts say, less the two that are no exercise,
+    // and per exercise as many as the usage says.
+    let history = store.strength_history().unwrap();
+    assert_eq!(history.len(), usize::try_from(counted_sets - 2).unwrap());
+    let mut by_exercise: HashMap<ExerciseId, u32> = HashMap::new();
+    for set in &history {
+        *by_exercise.entry(set.exercise).or_default() += 1;
+    }
+    assert_eq!(by_exercise, usage);
 
     // The filter finds exactly the activities whose stored count includes the exercise.
     let mut found_in: HashMap<i64, u32> = HashMap::new();
@@ -315,6 +326,176 @@ fn the_stored_counts_the_filter_and_the_usage_agree() {
     assert_eq!(listed(&store, &with(|f| f.exercise = Some(curl()))), [1]);
     assert_eq!(listed(&store, &with(|f| f.exercise = Some(category_only))), [1]);
     assert_eq!(listed(&store, &with(|f| f.exercise = Some(ExerciseId { category: 0, name: Some(2) }))), Vec::<i64>::new());
+}
+
+/// What `strength_history` should return for a set of the activity `id` begun at 08:00 on `day`, with no plan.
+fn history_set(id: i64, day: u32, set: SetRef, exercise: ExerciseId, weight_kg: Option<f64>, reps_count: Option<u32>) -> HistorySet {
+    HistorySet {
+        activity: ActivityId(id),
+        start: at(day, 8),
+        local_start: None,
+        workout_name: Some("Legs".to_owned()),
+        set,
+        exercise,
+        weight: weight_kg.map(kg),
+        reps: reps_count.map(reps),
+        plan_reps: None,
+    }
+}
+
+#[test]
+fn history_holds_counted_sets_with_corrections() {
+    let store = store_with(&[strength(1, 20), strength(2, 21)]);
+    let unknown_name = ExerciseId { category: ExerciseId::UNKNOWN_CATEGORY, name: Some(3) };
+    load(
+        &store,
+        1,
+        vec![
+            work(0, Some(deadlift())),         // corrected below: 60 kg, 5 reps
+            work(1, Some(squat())),            // corrected below: a curl
+            work(2, Some(deadlift())),         // switched off by the user
+            blank(3, Some(deadlift())),        // empty by the rule
+            blank(4, Some(deadlift())),        // empty by the rule, but switched on by the user
+            work(5, None),                     // no exercise
+            work(6, Some(unknown_exercise())), // Garmin's unknown category
+            work(7, Some(unknown_name)),       // the same, with a name
+        ],
+    );
+    edit(&store, 1, SetRef::Recorded(0), SetChange { weight: Some(kg(60.0)), reps: Some(reps(5)), ..SetChange::default() });
+    set_exercise(&store, 1, SetRef::Recorded(1), curl());
+    set_counted(&store, 1, SetRef::Recorded(2), Some(false));
+    set_counted(&store, 1, SetRef::Recorded(4), Some(true));
+    store.add_set(ActivityId(1), None, squat(), Some(kg(20.0)), Some(reps(10)), at(25, 12)).unwrap();
+    let removed = store.add_set(ActivityId(1), None, deadlift(), Some(kg(99.0)), Some(reps(1)), at(25, 12)).unwrap();
+    store.remove_added_set(ActivityId(1), removed, at(25, 13)).unwrap();
+    // An excluded activity counts nothing, whatever its sets and added sets hold.
+    load(&store, 2, vec![work(0, Some(deadlift()))]);
+    add(&store, 2, squat());
+    store.set_activity_excluded(ActivityId(2), true).unwrap();
+
+    let added_id = store.activity_detail(ActivityId(1)).unwrap().unwrap().added.first().map(|set| set.id).unwrap();
+    let expected = vec![
+        history_set(1, 20, SetRef::Recorded(0), deadlift(), Some(60.0), Some(5)),
+        history_set(1, 20, SetRef::Recorded(1), curl(), Some(50.0), Some(8)),
+        history_set(1, 20, SetRef::Recorded(4), deadlift(), None, None),
+        history_set(1, 20, SetRef::Added(added_id), squat(), Some(20.0), Some(10)),
+    ];
+    assert_eq!(store.strength_history().unwrap(), expected);
+
+    // Excluding the activity takes everything out; putting it back changes the answer at once.
+    store.set_activity_excluded(ActivityId(1), true).unwrap();
+    assert_eq!(store.strength_history().unwrap(), Vec::<HistorySet>::new());
+    store.set_activity_excluded(ActivityId(1), false).unwrap();
+    store.set_activity_excluded(ActivityId(2), false).unwrap();
+    assert_eq!(store.strength_history().unwrap().len(), 4 + 2);
+}
+
+#[test]
+fn history_of_an_empty_database_is_empty() {
+    assert_eq!(Store::open_in_memory().unwrap().strength_history().unwrap(), Vec::<HistorySet>::new());
+    // Activities with no sets at all have no history either.
+    assert_eq!(store_with(&[strength(1, 20)]).strength_history().unwrap(), Vec::<HistorySet>::new());
+}
+
+#[test]
+fn history_order_and_plan() {
+    // Inserted in the reverse order of their start; 3 begins at the very moment 1 does.
+    let store = store_with(&[strength(1, 22), strength(2, 21), activity(3, "strength_training", at(22, 8), false)]);
+    let mut planned = work(0, Some(deadlift()));
+    planned.plan = Some(PlannedTarget { reps: Some(reps(10)), weight: Some(kg(70.0)) });
+    let mut open_plan = work(1, Some(deadlift()));
+    open_plan.plan = Some(PlannedTarget::default());
+    // The sets of 1 go in out of order; the history reads them in the order of the file.
+    load(&store, 1, vec![open_plan, work(2, Some(squat())), planned]);
+    load(&store, 2, vec![work(1, Some(curl())), work(0, Some(curl()))]);
+    load(&store, 3, vec![work(0, Some(squat()))]);
+    // Added sets come after the recorded ones of their activity, in the order they were made, wherever they were put.
+    let second_made = add(&store, 1, curl());
+    let first_made = store.add_set(ActivityId(1), Some(SetRef::Recorded(0)), squat(), None, None, at(25, 12)).unwrap();
+    let on_two = add(&store, 2, squat());
+    assert!(second_made < first_made && first_made < on_two);
+
+    let history = store.strength_history().unwrap();
+    let order: Vec<(i64, SetRef)> = history.iter().map(|set| (set.activity.0, set.set)).collect();
+    assert_eq!(
+        order,
+        [
+            (2, SetRef::Recorded(0)),
+            (2, SetRef::Recorded(1)),
+            (2, SetRef::Added(on_two)),
+            (1, SetRef::Recorded(0)),
+            (1, SetRef::Recorded(1)),
+            (1, SetRef::Recorded(2)),
+            (1, SetRef::Added(second_made)),
+            (1, SetRef::Added(first_made)),
+            (3, SetRef::Recorded(0)),
+        ]
+    );
+    // The plan is the plan of the recorded set; a plan that asked for no reps and added sets have none.
+    let plans: Vec<Option<Reps>> = history.iter().map(|set| set.plan_reps).collect();
+    assert_eq!(plans, [None, None, None, Some(reps(10)), None, None, None, None, None]);
+    assert_eq!(history.iter().map(|set| set.start).collect::<Vec<_>>()[..4], [at(21, 8), at(21, 8), at(21, 8), at(22, 8)]);
+}
+
+#[test]
+fn history_local_start() {
+    let items = [
+        ("{\"activityId\":1,\"startTimeLocal\":\"2026-11-01 00:30:00\"}", 20),
+        ("{\"activityId\":2}", 21),
+        ("{\"activityId\":3,\"startTimeLocal\":\"yesterday evening\"}", 22),
+        ("{\"activityId\":4,\"startTimeLocal\":1793493000}", 23),
+        ("{\"activityId\":5,\"startTimeLocal\":null}", 24),
+        ("{\"activityId\":6,\"startTimeLocal\":\"2026-11-01T00:30:00\"}", 25),
+        ("{\"activityId\":7,\"startTimeLocal\":\"2026-11-31 00:30:00\"}", 26),
+        ("{\"activityId\":8,\"startTimeLocal\":\"2026-11-01 00:30:00.0\"}", 27),
+        ("not json at all", 28),
+        ("[1, 2]", 29),
+    ];
+    let activities: Vec<NewActivity> = items
+        .iter()
+        .zip(1..)
+        .map(|((raw, day), id)| {
+            let mut item = strength(id, *day);
+            item.raw_json = (*raw).to_owned();
+            item
+        })
+        .collect();
+    let store = store_with(&activities);
+    for id in 1..=10 {
+        load(&store, id, vec![work(0, Some(deadlift()))]);
+    }
+    let local: Vec<(i64, Option<NaiveDateTime>)> = store.strength_history().unwrap().iter().map(|set| (set.activity.0, set.local_start)).collect();
+    let half_past_midnight = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap().and_hms_opt(0, 30, 0);
+    let mut expected = vec![(1, half_past_midnight)];
+    expected.extend((2..=10).map(|id| (id, None)));
+    assert_eq!(local, expected);
+    // The local time is not the start in UTC: the two are kept apart.
+    let first = store.strength_history().unwrap().remove(0);
+    assert_eq!(first.start, at(20, 8));
+}
+
+#[test]
+fn history_unusable_stored_values_are_errors_not_panics() {
+    for sql in [
+        "UPDATE activity SET start_at = 'soon'",
+        "UPDATE recorded_set SET reps = 5000 WHERE message_index = 1",
+        "UPDATE recorded_set SET weight_g = -1 WHERE message_index = 1",
+        "UPDATE recorded_set SET exercise_category = 70000 WHERE message_index = 1",
+        "UPDATE recorded_set SET exercise_name = -2 WHERE message_index = 1",
+        "UPDATE recorded_set SET plan_reps = 5000 WHERE message_index = 0",
+        "UPDATE recorded_set SET message_index = 70000 WHERE message_index = 1",
+        "UPDATE set_correction SET weight_g = 2000000",
+        "UPDATE set_correction SET reps = -1",
+        "UPDATE added_set SET weight_g = -1",
+        "UPDATE added_set SET reps = 5000",
+        "UPDATE added_set SET exercise_name = 70000",
+    ] {
+        let store = damaged(sql);
+        let history = store.strength_history();
+        assert!(matches!(history, Err(StoreError::Corrupt(_))), "{sql}: {history:?}");
+    }
+    // The undamaged store reads: the corrected set, the other recorded one and the added one.
+    assert_eq!(damaged("SELECT 1").strength_history().unwrap().len(), 3);
 }
 
 #[test]

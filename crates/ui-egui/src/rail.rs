@@ -1,5 +1,5 @@
-//! The icon rail: a narrow column on the left with Summary and Activities at the top and Settings at the bottom (spec
-//! §6, window variant C; activity import spec §2, item 4). It draws the sections, the number of activities the user has
+//! The icon rail: a narrow column on the left with Summary, Activities and Progress at the top and Settings at the bottom
+//! (spec §6, window variant C; activity import spec §2, item 4). It draws the sections, the number of activities the user has
 //! not opened on the Activities icon, and reports a click by changing the section; it knows nothing else.
 
 use egui::{Align, CursorIcon, FontId, Frame, Layout, Margin, Panel, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
@@ -24,6 +24,7 @@ pub(crate) fn show(section: &mut Section, new_count: u32, ui: &mut Ui) {
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 item(ui, &t, section, Section::Summary, Icon::House, tl!("Summary"), 0);
                 item(ui, &t, section, Section::Activities, Icon::Dumbbell, tl!("Activities"), new_count);
+                item(ui, &t, section, Section::Progress, Icon::ChartLine, tl!("Progress"), 0);
             });
             ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
                 item(ui, &t, section, Section::Settings, Icon::Settings, tl!("Settings"), 0);

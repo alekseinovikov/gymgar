@@ -5,6 +5,7 @@
 # Navigation
 Summary	Сводка
 Activities	Тренировки
+Progress	Прогресс
 Settings	Настройки
 
 # Why a command failed (spec section 2, item 3, for the Garmin failures)
@@ -227,3 +228,84 @@ Gymgar could not open its data. Check that the disk is available and the file is
 Start Gymgar again. If the problem remains, report the error below.	Запустите Gymgar снова. Если проблема останется, сообщите об ошибке ниже.
 Details	Подробности
 File	Файл
+
+# Progress (exercise progress spec section 2, items 2 and 7). The status of a tile is a word or two; a week is "wk"
+# in English and "нед." in Russian, which does not decline.
+Can add · {}	Можно добавлять · {}
+Break · {}	Перерыв · {}
+can add {}	можно {}
+can add	можно добавлять
+hold · {} of {}	держим · {} из {}
+hold · one more session	держим · ещё одно занятие
+hold	держим
+after a break	после перерыва
+break · {} wk	перерыв · {} нед.
+break	перерыв
+bodyweight	без веса
+no target	нет цели
+{} rep	{} повтор
+{} reps (2 to 4)	{} повтора
+{} reps	{} повторов
+No exercises here	Здесь нет упражнений
+Progress will appear here once strength workouts are loaded	Здесь появится прогресс, когда загрузятся силовые тренировки
+Back	Назад
+
+# The page of an exercise (exercise progress spec section 2, item 3, and the table of section 7). Weeks and reps decline in
+# Russian, so each has three lines. The `(2 to 4)` forms are never shown in English: they only keep the keys apart.
+{} session	{} занятие
+{} sessions (2 to 4)	{} занятия
+{} sessions	{} занятий
+{sessions} since {month}	{sessions} с {month}
+target — {}	цель — {}
+program {}	по программе {}
+No sessions of this exercise yet	У этого упражнения ещё нет занятий
+Sessions	Занятия
+Weight at {} rep	Вес на {} повтор
+Weight at {} reps (2 to 4)	Вес на {} повтора
+Weight at {} reps	Вес на {} повторов
+Reps by month	Повторы по месяцам
+Weight at {}+ reps	Вес на {}+ повторов
+Best reps of the month	Лучшие повторы месяца
+Fewer than {} rep	Меньше {} повтора
+Fewer than {} reps (2 to 4)	Меньше {} повторов
+Fewer than {} reps	Меньше {} повторов
+Break	Перерыв
+Nothing to chart yet	Пока нечего показать на графике
+May|label	май
+{} and {}	{} и {}
+Can add: {}	Можно добавлять: {}
+Can add weight	Можно добавлять вес
+{working} two sessions in a row — {dates}.	{working} два занятия подряд — {dates}.
+{working} two sessions in a row.	{working} два занятия подряд.
+Every set at {weight} hit {target} two sessions in a row — {dates}.	Все подходы на {weight} сделали {target} два занятия подряд — {dates}.
+With {weight} expect about 8 reps, then build back up to {target}.	С {weight} ждите около 8 повторов, дальше снова до {target}.
+With {weight} expect a couple of reps fewer, then build back up to {target}.	С {weight} ждите на пару повторов меньше, дальше снова до {target}.
+Hold {}	Держим {}
+Hold {} for one more session	Держим {} ещё одно занятие
+{working} — {date}. Hit {target} once more and you can add weight.	{working} — {date}. Ещё раз {target} — и можно добавлять.
+Last time {working} of {target} ({date}). Add weight once you hit {target} in two sessions in a row.	Последний раз {working} из {target} ({date}). Добавлять — когда сделаете {target} два занятия подряд.
+Last time {working} with a target of {target} ({date}). Add weight once every set at this weight hits {target} in two sessions in a row.	Последний раз {working} при цели {target} ({date}). Добавлять — когда все подходы на этом весе сделают {target} два занятия подряд.
+Last time {working} ({date}).	Последний раз {working} ({date}).
+After a {}-week break, we count anew.	После перерыва в {} неделю считаем заново.
+After a {}-week break we count anew. (2 to 4)	После перерыва в {} недели считаем заново.
+After a {}-week break we count anew.	После перерыва в {} недель считаем заново.
+Before the break: {}.	До перерыва: {}.
+Break {} week	Перерыв {} неделя
+Break {} weeks (2 to 4)	Перерыв {} недели
+Break {} weeks	Перерыв {} недель
+Last session {date}: {working}. The first session after the break will be the new starting point.	Последнее занятие {date}: {working}. Первое занятие после перерыва станет новой точкой отсчёта.
+Bodyweight exercise	Упражнение без веса
+The chart shows reps.	График показывает повторы.
+The last session had no weight, so there is nothing to advise on. The chart shows the sessions with weight.	В последнем занятии веса не было, подсказывать нечего. На графике — занятия с весом.
+No target in the program	Нет цели по программе
+The advice will appear once the exercise is in a program that plans reps.	Подсказка появится, когда упражнение пойдёт по программе с повторами в плане.
+
+# Pointing to the advice: the card of the Summary and the line in a workout (exercise progress spec section 2, items 4 and 5).
+# The Russian title of the card is the spec's: "Можно добавлять: 2 упражнения". "и ещё {}" needs no noun, so it does not decline.
+Can add weight: {} exercise	Можно добавлять: {} упражнение
+Can add weight: {} exercises (2 to 4)	Можно добавлять: {} упражнения
+Can add weight: {} exercises	Можно добавлять: {} упражнений
+{from} to {to}	с {from} до {to}
+and {} more	и ещё {}
+Open progress	Открыть прогресс
+open progress	открыть прогресс

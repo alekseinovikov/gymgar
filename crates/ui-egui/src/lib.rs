@@ -12,6 +12,9 @@ mod garmin_ui;
 pub mod i18n;
 pub mod icons;
 mod numbers;
+mod progress_chart;
+mod progress_detail_ui;
+mod progress_ui;
 mod rail;
 mod set_edit_ui;
 mod settings_ui;
@@ -27,4 +30,4 @@ pub mod widgets;
 
 pub use app::GymgarApp;
 pub use startup_error::StartupErrorApp;
-pub use state::{ActivitiesState, ConnectForm, ListFilter, Picker, PickerTarget, Section, SetEdit, UiState};
+pub use state::{ActivitiesState, ConnectForm, ListFilter, Picker, PickerTarget, ProgressFilter, ProgressState, Section, SetEdit, UiState};
