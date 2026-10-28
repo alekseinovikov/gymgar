@@ -812,7 +812,7 @@ fn the_rail_has_a_progress_button_that_opens_the_section() {
         test_support::click(&mut harness, label);
         assert_eq!(harness.state().ui.section, Section::Progress, "{lang:?}");
         assert_eq!(format!("{:?}", harness.get_by_role_and_label(Role::Button, label).accesskit_node().toggled()), "Some(True)", "{lang:?}");
-        // The section has its title, for now all it draws.
+        // The section has its title (here there is nothing to show under it).
         harness.get_by_role_and_label(Role::Heading, label);
         // The rail is still there to go back by.
         test_support::click(&mut harness, test_support::pick(lang, "Summary", "Сводка"));

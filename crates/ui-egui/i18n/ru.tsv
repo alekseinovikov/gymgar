@@ -228,3 +228,24 @@ Gymgar could not open its data. Check that the disk is available and the file is
 Start Gymgar again. If the problem remains, report the error below.	Запустите Gymgar снова. Если проблема останется, сообщите об ошибке ниже.
 Details	Подробности
 File	Файл
+
+# Progress (exercise progress spec section 2, items 2 and 7). The status of a tile is a word or two; a week is "wk"
+# in English and "нед." in Russian, which does not decline.
+Can add · {}	Можно добавлять · {}
+Break · {}	Перерыв · {}
+↑ can add {}	↑ можно {}
+↑ can add	↑ можно добавлять
+hold · {} of {}	держим · {} из {}
+hold · one more session	держим · ещё одно занятие
+hold	держим
+after a break	после перерыва
+break · {} wk	перерыв · {} нед.
+break	перерыв
+bodyweight	без веса
+no target	нет цели
+{} rep	{} повтор
+{} reps (2 to 4)	{} повтора
+{} reps	{} повторов
+No exercises here	Здесь нет упражнений
+Progress will appear here once strength workouts are loaded	Здесь появится прогресс, когда загрузятся силовые тренировки
+← Back	← Назад

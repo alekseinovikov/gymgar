@@ -154,6 +154,21 @@ pub mod metrics {
     /// Height of an option in a list to choose from, and the space between its edge and its text.
     pub const OPTION_HEIGHT: f32 = 26.0;
     pub const OPTION_PADDING: f32 = 8.0;
+    /// The exercise tiles of Progress: the narrowest a tile gets (the grid has as many columns as fit), the space between
+    /// its edge and its content, the size of the numbers it shows, and the height and stroke of the line of its chart.
+    pub const TILE_MIN_WIDTH: f32 = 230.0;
+    pub const TILE_PADDING: i8 = 12;
+    pub const TILE_VALUE_SIZE: f32 = 15.0;
+    pub const SPARKLINE_HEIGHT: f32 = 28.0;
+    pub const SPARKLINE_STROKE: f32 = 1.8;
+    /// The dot of a chart that has one point only.
+    pub const SPARKLINE_DOT: f32 = 2.5;
+    /// How much of its colour a tile keeps when it is dimmed: an exercise nobody has done for half a year.
+    pub const DIMMED_OPACITY: f32 = 0.55;
+    /// The status label of a tile: its corner radius and the space between its edge and its text.
+    pub const PILL_RADIUS: f32 = 10.0;
+    pub const PILL_PADDING_X: i8 = 8;
+    pub const PILL_PADDING_Y: i8 = 2;
 }
 
 fn tokens_id() -> Id {

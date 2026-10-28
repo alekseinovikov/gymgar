@@ -30,6 +30,8 @@ gymgar-engine = { workspace = true, features = ["testing"] }
 # `eframe` runs the real app (its `logic` and `ui`) in the harness, so the PNG has no frame of the harness's own.
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
 image = { workspace = true }
+# The system fonts a real window falls back to, for the arrows the bundled fonts lack: the snapshot test draws with them.
+egui_system_font_provider = { workspace = true }
 # Two connections to one database file (another process changing a setting) and a database damaged on purpose.
 gymgar-store = { workspace = true }
 rusqlite = { workspace = true }

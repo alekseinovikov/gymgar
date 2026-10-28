@@ -413,3 +413,143 @@ fn a_popover_floats_over_the_screen_with_its_corner_where_asked() {
     assert!(inside.right() <= corner.x && inside.top() >= corner.y && inside.left() >= corner.x - 240.0, "{inside:?}");
     harness.get_by_label("Choose exercise");
 }
+
+/// The rectangles painted in the last frame, as (fill, stroke colour, corner radius).
+fn painted_rects(harness: &egui_kittest::Harness<'_, impl Sized>) -> Vec<(egui::Color32, egui::Color32, CornerRadius)> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            Shape::Rect(rect) => Some((rect.fill, rect.stroke.color, rect.corner_radius)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_tile_holds_its_content_takes_clicks_and_is_a_card() {
+    let mut harness = ui_harness(
+        |ui, clicks: &mut u32| {
+            let response = tile(ui, false, false, |ui| {
+                ui.label("Inside the tile");
+            });
+            response.widget_info(|| WidgetInfo::labeled(Role::Button, true, "A tile"));
+            *clicks += u32::from(response.clicked());
+        },
+        0,
+    );
+    harness.get_by_label("Inside the tile");
+    let t = Tokens::SPORT;
+    assert!(painted_rects(&harness).contains(&(t.card, t.border, CornerRadius::from(t.radius_card))), "a tile is a card with a border");
+    harness.get_by_role_and_label(Role::Button, "A tile").click();
+    harness.run();
+    assert_eq!(*harness.state(), 1);
+}
+
+#[test]
+fn a_tile_that_asks_to_add_has_the_accent_border_and_a_dimmed_one_is_faded() {
+    let t = Tokens::SPORT;
+    let drawn = |accent: bool, dim: bool| {
+        let mut harness = ui_harness(
+            |ui, _: &mut ()| {
+                tile(ui, accent, dim, |ui| {
+                    ui.label("x");
+                });
+            },
+            (),
+        );
+        harness.run();
+        painted_rects(&harness)
+    };
+    let radius = CornerRadius::from(t.radius_card);
+    assert!(drawn(true, false).contains(&(t.card, t.accent, radius)));
+    assert!(!drawn(false, false).iter().any(|(_, stroke, _)| *stroke == t.accent));
+    // Dimmed: what the tile paints is the same colours, less opaque.
+    let faded = |color: egui::Color32| color.gamma_multiply(metrics::DIMMED_OPACITY);
+    assert!(drawn(false, true).contains(&(faded(t.card), faded(t.border), radius)));
+    assert!(drawn(true, true).contains(&(faded(t.card), faded(t.accent), radius)));
+}
+
+#[test]
+fn a_status_label_is_drawn_in_the_colour_of_its_tone() {
+    let mut harness = ui_harness(
+        |ui, _: &mut ()| {
+            advice_label(ui, "↑ can add 85 kg", Tone::Accent);
+            advice_label(ui, "hold · 6 of 10", Tone::Dim);
+            advice_label(ui, "break · 10 wk", Tone::Warning);
+        },
+        (),
+    );
+    harness.run();
+    let t = Tokens::SPORT;
+    for (text, color) in [("↑ can add 85 kg", t.accent), ("hold · 6 of 10", t.text_dim), ("break · 10 wk", t.warning)] {
+        harness.get_by_label(text);
+        assert_eq!(text_colour(&harness, text), Some(color), "{text}");
+    }
+    // Only the one that asks for attention is filled; every label is a rounded outline.
+    let rects = painted_rects(&harness);
+    assert!(rects.iter().any(|(fill, _, _)| *fill == t.accent_soft));
+    assert!(rects.iter().filter(|(_, _, radius)| *radius == CornerRadius::from(metrics::PILL_RADIUS)).count() >= 3);
+}
+
+/// The size the sparkline tests give the chart.
+const SPARK: egui::Vec2 = egui::vec2(120.0, metrics::SPARKLINE_HEIGHT);
+
+/// What `sparkline` painted for `values`: the polyline's points, and the number of dots, and the rectangle it took.
+fn sparkline_of(values: &[f32]) -> (Vec<egui::Pos2>, usize, egui::Rect) {
+    let mut harness = ui_harness(
+        |ui, (values, rect): &mut (Vec<f32>, egui::Rect)| {
+            ui.set_max_width(400.0);
+            let before = ui.cursor().min;
+            sparkline(ui, values, Tokens::SPORT.accent, SPARK);
+            *rect = egui::Rect::from_min_size(before, SPARK);
+        },
+        (values.to_vec(), egui::Rect::NOTHING),
+    );
+    harness.run();
+    let rect = harness.state().1;
+    let mut lines = Vec::new();
+    let mut dots = 0;
+    for clipped in &harness.output().shapes {
+        match &clipped.shape {
+            Shape::Path(path) if path.stroke.color == egui::epaint::ColorMode::Solid(Tokens::SPORT.accent) => lines.extend(path.points.iter().copied()),
+            Shape::Circle(circle) if circle.fill == Tokens::SPORT.accent => dots += 1,
+            _ => {}
+        }
+    }
+    (lines, dots, rect)
+}
+
+#[test]
+fn a_sparkline_with_no_points_one_point_or_twelve_does_not_panic_and_keeps_its_size() {
+    // Nothing to draw: nothing is drawn.
+    let (line, dots, _) = sparkline_of(&[]);
+    assert_eq!((line.len(), dots), (0, 0));
+    // One point is a dot, not a line.
+    let (line, dots, rect) = sparkline_of(&[80.0]);
+    assert_eq!((line.len(), dots), (0, 1));
+    // Twelve points are a line of twelve, inside its rectangle, going up with the values.
+    let values: Vec<f32> = (0..12).map(|month| 60.0 + month as f32).collect();
+    let (line, dots, rect12) = sparkline_of(&values);
+    assert_eq!((line.len(), dots), (12, 0));
+    assert!(line.iter().all(|point| rect12.contains(*point) && point.is_finite()), "{line:?} not in {rect12:?}");
+    assert!(line.windows(2).all(|pair| pair[0].x < pair[1].x && pair[0].y > pair[1].y), "left to right and up: {line:?}");
+    assert_eq!(rect.size(), rect12.size());
+}
+
+#[test]
+fn a_sparkline_survives_flat_missing_and_extreme_values() {
+    // A flat series is a level line in the middle.
+    let (line, _, rect) = sparkline_of(&[50.0, 50.0, 50.0]);
+    assert_eq!(line.len(), 3);
+    assert!(line.iter().all(|point| (point.y - rect.center().y).abs() < 1.0), "{line:?}");
+    // What is not a number is left out, and the rest still draws.
+    let (line, dots, _) = sparkline_of(&[1.0, f32::NAN, 3.0, f32::INFINITY, f32::NEG_INFINITY]);
+    assert_eq!((line.len(), dots), (2, 0));
+    assert!(line.iter().all(|point| point.is_finite()));
+    // Nothing but those is nothing; the extremes of the type do not overflow.
+    assert_eq!(sparkline_of(&[f32::NAN, f32::INFINITY]).0.len(), 0);
+    let (line, _, _) = sparkline_of(&[f32::MIN, f32::MAX]);
+    assert!(line.iter().all(|point| point.is_finite()), "{line:?}");
+}

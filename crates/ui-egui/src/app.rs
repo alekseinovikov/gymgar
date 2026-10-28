@@ -32,7 +32,7 @@ use serde_json::{Map, Value};
 use crate::i18n;
 use crate::state::{ListFilter, Section, UiState};
 use crate::theme::{Tokens, metrics};
-use crate::{activities_ui, rail, settings_ui, summary_ui, tl, widgets};
+use crate::{activities_ui, progress_ui, rail, settings_ui, summary_ui, tl, widgets};
 
 /// How often the window looks at the database for changes another process (the CLI, an agent) has made.
 const STORE_POLL: Duration = Duration::from_secs(1);
@@ -182,10 +182,10 @@ impl GymgarApp {
         }
         let t = Tokens::get(ui.ctx());
         if self.ui.section == Section::Progress {
-            // The tiles and the exercise page (soon) take the whole width, not a screen's column.
+            // The tiles and the exercise page take the whole width, not a screen's column; the tiles scroll on their own.
             CentralPanel::default().frame(Frame::new().fill(t.bg).inner_margin(Margin::same(metrics::SCREEN_MARGIN))).show(ui, |ui| {
                 self.banner(ui);
-                widgets::heading(ui, tl!("Progress"));
+                progress_ui::show(self, ui);
             });
             return;
         }
@@ -352,7 +352,6 @@ impl GymgarApp {
     }
 
     /// Opens the page of the exercise `key` (`progress.get`) at once, or closes the open one with `None`.
-    #[allow(dead_code, reason = "the Progress screens that call it come with the next tasks")]
     pub(crate) fn open_exercise(&mut self, key: Option<String>) {
         self.ui.progress.open = key;
         self.read_progress_detail();

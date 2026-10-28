@@ -1,14 +1,14 @@
 //! Helpers the UI tests share: a headless harness with the Sport theme and the icons installed, an app on the engine's
 //! test doubles, and the few gestures every screen test makes. Compiled for tests only.
 
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 use egui::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::{Harness, HarnessBuilder};
-use gymgar_domain::{ActivityId, ActivitySummary, GarminConnection, STRENGTH_TYPE_KEY, SecretBackend};
-use gymgar_engine::testing::{TestConfig, TestHandles, connection_at, save_connection, seed_fixture_activities, test_session_on};
+use gymgar_domain::{ActivityId, ActivitySummary, ExerciseId, GarminConnection, RecordedSet, STRENGTH_TYPE_KEY, SecretBackend, StrengthRecord};
+use gymgar_engine::testing::{TestConfig, TestHandles, connection_at, save_connection, seed_fixture_activities, seed_workout, test_session_on};
 use gymgar_engine::{Outcome, SecretStore, Session};
-use gymgar_store::{NewActivity, Store};
+use gymgar_store::{FileOutcome, NewActivity, Store};
 use secrecy::SecretString;
 use serde_json::json;
 
@@ -24,8 +24,11 @@ pub(crate) const WINDOW: egui::Vec2 = egui::vec2(1200.0, 800.0);
 pub(crate) const TEST_LOCALE: &str = "en-US";
 
 /// A harness builder with the test window's size, styled and ready for icons as the real window is.
+///
+/// A character no bundled font has is drawn as a box, not a panic: the arrows of Progress (`↑`, `←`) come from the
+/// operating system's fonts in the real window (eframe falls back to them), and a headless test has none.
 pub(crate) fn builder<S>() -> HarnessBuilder<S> {
-    Harness::builder().with_size(WINDOW).with_context_setup(|ctx| {
+    Harness::builder().with_size(WINDOW).allow_missing_glyphs().with_context_setup(|ctx| {
         theme::apply(ctx, &Tokens::SPORT);
         icons::install(ctx);
     })
@@ -94,6 +97,41 @@ pub(crate) fn app_seeded_with<T>(
     seed_fixture_activities(&session);
     let seeded = seed(&session);
     (open(session, locale(lang), &cfg, true), handles, seeded)
+}
+
+/// A window open a while on a database that holds `workouts` and nothing else (no fixture activities, so no other exercise
+/// has a tile), with Garmin connected. A workout is its local start (`2026-10-20 07:55:00`), its program's name and its
+/// sets, in a zone two hours ahead of UTC; the first has the activity id 7,100,001 and so on. The session's clock is
+/// 2026-10-27 12:00 UTC, which dates are shown in too, so a week-old session is fresh.
+pub(crate) fn app_with_workouts(lang: Lang, workouts: &[(&str, Option<&str>, Vec<RecordedSet>)]) -> (GymgarApp, TestHandles) {
+    let store = Store::open_in_memory().expect("an in-memory store");
+    for (id, (local_start, name, sets)) in (7_100_001_i64..).zip(workouts) {
+        seed_workout(&store, id, local_start, 2, *name, sets.clone());
+    }
+    app_on_store(lang, store)
+}
+
+/// The clock of the windows of [`app_on_store`]: what "today" is for the progress of an exercise.
+pub(crate) fn progress_now() -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 10, 27, 12, 0, 0).single().expect("a valid time")
+}
+
+/// A window open a while on `store`, with Garmin connected, at the clock of [`progress_now`].
+pub(crate) fn app_on_store(lang: Lang, store: Store) -> (GymgarApp, TestHandles) {
+    let cfg = TestConfig { now: progress_now(), ..TestConfig::default() };
+    let (session, handles) = test_session_on(store, cfg.clone());
+    save_connection(&session, &working_connection(&cfg));
+    handles.file.set(&SecretString::from("the-saved-key")).expect("save the key");
+    (open(session, locale(lang), &cfg, true), handles)
+}
+
+/// Stores a strength workout that began at `start` with `sets`, and `titles` the watch gave its exercises (what a Russian
+/// interface shows instead of the English names, when they are in Cyrillic). The engine's `seed_workout` has none.
+pub(crate) fn seed_titled_workout(store: &Store, id: i64, start: DateTime<Utc>, sets: Vec<RecordedSet>, titles: Vec<(ExerciseId, String)>) {
+    let activity = listed(id, STRENGTH_TYPE_KEY, None, start, false);
+    store_activities(store, &[activity]);
+    let record = StrengthRecord { workout_name: None, sets, titles };
+    store.apply_file(ActivityId(id), FileOutcome::Parsed { zip: None, record, parser_version: 1 }, start).expect("store the sets");
 }
 
 /// An activity as a sync stores it: an hour long, and 5.2 km unless it is a strength one.
