@@ -17,6 +17,10 @@ mod exercise_cmds;
 mod garmin_cmds;
 mod jobs;
 pub mod params;
+// `progress.list` and `progress.get` come next and are the only callers of the builders, which stay unused until then (the
+// expectation fails the build once they are used, to be removed with it).
+#[cfg_attr(not(test), expect(dead_code, reason = "built for progress.list and progress.get, which are added next"))]
+mod progress_views;
 mod services;
 mod session;
 mod settings_cmds;
@@ -34,6 +38,9 @@ pub use commands::{Caller, CommandKind, CommandSpec, JobId, Outcome};
 pub use error::EngineError;
 pub use garmin_cmds::{ConnectParams, GarminStatusView};
 pub use jobs::{JobEvent, JobFinished};
+pub use progress_views::{
+    AdviceKind, AdviceView, GapView, PointView, ProgressItemView, ProgressListView, ProgressView, SessionView, SetBriefView, WorkingView,
+};
 pub use services::{BoxFuture, GarminAuth, GarminAuthError, GarminSession, SecretStore, SecretStoreError, SecretStores, Services, Spawner};
 pub use session::Session;
 pub use settings_cmds::SettingsView;

@@ -23,6 +23,36 @@ pub fn exercise_key(id: ExerciseId) -> String {
     garmin::exercise_key(id.category, id.name)
 }
 
+/// The categories whose sets are not lifting: warming up, running, cycling, rowing and the other cardio or movement work.
+/// Named by key, as the catalog spells them, so the list reads the same as what the user sees in an exercise's id.
+const NOT_STRENGTH: [&str; 14] = [
+    "warm_up",
+    "cardio",
+    "run",
+    "bike",
+    "cardio_sensors",
+    "move",
+    "pose",
+    "elliptical",
+    "floor_climb",
+    "indoor_bike",
+    "indoor_row",
+    "stair_stepper",
+    "run_indoor",
+    "bike_outdoor",
+];
+
+/// Whether the exercise is strength work, the kind whose progress is worth a chart: the category decides, whatever the name
+/// inside it. Garmin's "unknown" category (the watch did not know the exercise) is never strength; a category the catalog
+/// does not name is, because a lift we cannot read is likelier than cardio we cannot read.
+pub fn is_strength(id: ExerciseId) -> bool {
+    if id.category == ExerciseId::UNKNOWN_CATEGORY {
+        return false;
+    }
+    let category = exercise_key(ExerciseId { category: id.category, name: None });
+    !NOT_STRENGTH.contains(&category.as_str())
+}
+
 /// The inverse of [`exercise_key`]; `None` for text that is not a key.
 pub fn parse_exercise_key(key: &str) -> Option<ExerciseId> {
     garmin::parse_exercise_key(key).map(|(category, name)| ExerciseId { category, name })
@@ -88,6 +118,41 @@ mod tests {
         assert_eq!(parse_exercise_key(""), None);
         assert_eq!(parse_exercise_key("not an exercise"), None);
         assert_eq!(parse_exercise_key("deadlift/99999"), None);
+    }
+
+    #[test]
+    fn is_strength_drops_warm_up_cardio_and_run() {
+        let by_key = |key: &str| parse_exercise_key(key).unwrap();
+        // The categories that are not lifting, each by the key the catalog gives it (and with a name inside, where it has any).
+        for key in [
+            "warm_up",
+            "cardio",
+            "run",
+            "bike",
+            "cardio_sensors",
+            "move",
+            "pose",
+            "elliptical",
+            "floor_climb",
+            "indoor_bike",
+            "indoor_row",
+            "stair_stepper",
+            "run_indoor",
+            "bike_outdoor",
+        ] {
+            let category = by_key(key);
+            assert_eq!(category.name, None, "{key} is a category alone");
+            assert!(!is_strength(category), "{key}");
+            assert!(!is_strength(ExerciseId { name: Some(1), ..category }), "{key} with a name");
+        }
+        assert!(!is_strength(id(ExerciseId::UNKNOWN_CATEGORY, None)));
+        assert!(!is_strength(id(ExerciseId::UNKNOWN_CATEGORY, Some(3))));
+
+        assert!(is_strength(by_key("deadlift/romanian_deadlift")));
+        assert!(is_strength(by_key("curl")), "a category alone");
+        assert!(is_strength(by_key("plank")));
+        // A number the catalog does not name is still a lift, not a guess at cardio.
+        assert!(is_strength(id(900, Some(3))));
     }
 
     #[test]
