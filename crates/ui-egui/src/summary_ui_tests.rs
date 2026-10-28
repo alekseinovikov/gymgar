@@ -1,13 +1,15 @@
 use chrono::TimeDelta;
 use egui::Role;
 use egui_kittest::kittest::Queryable;
-use gymgar_domain::{ConnectionStatus, GarminConnection, STRENGTH_TYPE_KEY};
-use gymgar_engine::testing::TestConfig;
+use gymgar_domain::{ConnectionStatus, ExerciseId, GarminConnection, RecordedSet, STRENGTH_TYPE_KEY};
+use gymgar_engine::testing::{TestConfig, strength_set};
+use serde_json::json;
 
 use crate::Section;
+use crate::activity_detail_ui::exercise_name;
 use crate::i18n::Lang;
-use crate::state::ListFilter;
-use crate::test_support::{app_connected, app_in, app_seeded, click, harness, listed, pick, store_activities, working_connection};
+use crate::state::{ListFilter, ProgressFilter};
+use crate::test_support::{app_connected, app_in, app_seeded, app_with_workouts, click, harness, listed, pick, store_activities, working_connection};
 
 /// The state line of the Garmin card on a working connection.
 const CONNECTED_TEXT: (&str, &str) = ("Connected", "Подключено");
@@ -221,4 +223,146 @@ fn a_summary_without_strength_workouts_has_no_card_for_them() {
     let harness = harness(app);
     assert!(harness.query_by_label("Last strength workout").is_none());
     harness.get_by_label("Connected");
+}
+
+const SQUAT: ExerciseId = ExerciseId { category: 28, name: None };
+const BENCH: ExerciseId = ExerciseId { category: 0, name: None };
+const DEADLIFT: ExerciseId = ExerciseId { category: 8, name: None };
+
+type Workout = (&'static str, Option<&'static str>, Vec<RecordedSet>);
+
+/// One working set of an exercise, planned for 10 reps.
+fn lift(exercise: ExerciseId, kg: f64, reps: u32) -> RecordedSet {
+    strength_set(0, exercise, kg, reps, Some(10))
+}
+
+/// Two exercises that can add weight and one to hold. The deadlift was done a day after the squat each time, so its advice
+/// is the newer one and comes first. The first workout is the activity 7,100,001 and so on.
+fn two_can_add() -> Vec<Workout> {
+    vec![
+        ("2026-10-20 07:55:00", Some("Legs"), vec![lift(SQUAT, 80.0, 10)]),
+        ("2026-10-21 07:55:00", Some("Pull"), vec![lift(DEADLIFT, 50.0, 10)]),
+        ("2026-10-24 07:55:00", Some("Legs"), vec![lift(SQUAT, 80.0, 10)]),
+        ("2026-10-25 07:55:00", Some("Pull"), vec![lift(DEADLIFT, 50.0, 10)]),
+        ("2026-10-26 07:55:00", Some("Push"), vec![lift(BENCH, 95.0, 8)]),
+    ]
+}
+
+/// Six exercises, the first of them the squat, each of which can add 5 kg to 80: the exercise `n` was done on 2 + `n` and
+/// 9 + `n` October, so the last one listed is the newest.
+fn six_can_add(count: usize) -> Vec<Workout> {
+    const EXERCISES: [ExerciseId; 6] =
+        [SQUAT, BENCH, DEADLIFT, ExerciseId { category: 23, name: None }, ExerciseId { category: 7, name: None }, ExerciseId { category: 24, name: None }];
+    const FIRST: [&str; 6] =
+        ["2026-10-02 07:55:00", "2026-10-03 07:55:00", "2026-10-04 07:55:00", "2026-10-05 07:55:00", "2026-10-06 07:55:00", "2026-10-07 07:55:00"];
+    const SECOND: [&str; 6] =
+        ["2026-10-09 07:55:00", "2026-10-10 07:55:00", "2026-10-11 07:55:00", "2026-10-12 07:55:00", "2026-10-13 07:55:00", "2026-10-14 07:55:00"];
+    let sessions = |days: [&'static str; 6]| EXERCISES.into_iter().zip(days).take(count).map(|(exercise, day)| (day, None, vec![lift(exercise, 80.0, 10)]));
+    sessions(FIRST).chain(sessions(SECOND)).collect()
+}
+
+/// Where the label `text` is drawn: its top edge.
+fn label_top(harness: &egui_kittest::Harness<'_, crate::GymgarApp>, text: &str) -> f32 {
+    harness.get_by_label(text).rect().top()
+}
+
+#[test]
+fn a_card_lists_the_exercises_that_can_take_more_weight() {
+    for lang in Lang::ALL {
+        let (app, _handles) = app_with_workouts(lang, &two_can_add());
+        let harness = harness(app);
+        harness.get_by_label(pick(lang, "Can add weight: 2 exercises", "Можно добавлять: 2 упражнения"));
+        // From the weight the exercise is at to the weight it can go to; the step is 2.5 kg, and 50 kg + 5 % is 52.5.
+        harness.get_by_label(pick(lang, "50 to 52.5 kg", "50 до 52,5 кг"));
+        harness.get_by_label(pick(lang, "80 to 85 kg", "80 до 85 кг"));
+        // In the order of the tiles, the newest advice first.
+        assert!(label_top(&harness, "Deadlift") < label_top(&harness, "Squat"), "{lang:?}");
+        // The exercise that holds is not on the card.
+        assert!(harness.query_by_label("Bench press").is_none(), "{lang:?}");
+        harness.get_by_role_and_label(Role::Button, pick(lang, "Open progress", "Открыть прогресс"));
+    }
+}
+
+#[test]
+fn the_card_is_not_there_when_no_exercise_can_add() {
+    for lang in Lang::ALL {
+        // One session each: nothing to base the advice on yet; and a bench press that holds.
+        let hold = [("2026-10-26 07:55:00", Some("Push"), vec![lift(BENCH, 95.0, 8)]), ("2026-10-25 07:55:00", None, vec![lift(SQUAT, 80.0, 10)])];
+        for workouts in [Vec::new(), hold.to_vec()] {
+            let (app, _handles) = app_with_workouts(lang, &workouts);
+            let harness = harness(app);
+            assert!(harness.query_by_label_contains(pick(lang, "Can add weight", "Можно добавлять")).is_none(), "{lang:?}");
+            assert!(harness.query_by_role_and_label(Role::Button, pick(lang, "Open progress", "Открыть прогресс")).is_none(), "{lang:?}");
+        }
+    }
+}
+
+#[test]
+fn the_card_counts_its_exercises_in_the_language() {
+    for lang in Lang::ALL {
+        // One, two and six: the three forms of the Russian noun.
+        for (count, en, ru) in [
+            (1, "Can add weight: 1 exercise", "Можно добавлять: 1 упражнение"),
+            (2, "Can add weight: 2 exercises", "Можно добавлять: 2 упражнения"),
+            (6, "Can add weight: 6 exercises", "Можно добавлять: 6 упражнений"),
+        ] {
+            let (app, _handles) = app_with_workouts(lang, &six_can_add(count));
+            harness(app).get_by_label(pick(lang, en, ru));
+        }
+    }
+}
+
+#[test]
+fn the_card_lists_five_exercises_and_counts_the_rest() {
+    for lang in Lang::ALL {
+        let (app, _handles) = app_with_workouts(lang, &six_can_add(6));
+        let six = harness(app);
+        // The tiles' order: the newest first, so the squat, done first, is the sixth.
+        let names: Vec<String> = six.state().progress().iter().map(|item| exercise_name(&item.exercise).to_owned()).collect();
+        assert_eq!(names.len(), 6);
+        assert_eq!(names.last().map(String::as_str), Some("Squat"), "{lang:?}");
+        for name in &names[..5] {
+            six.get_by_label(name);
+        }
+        assert!(six.query_by_label("Squat").is_none(), "{lang:?}: the sixth is counted, not listed");
+        assert_eq!(six.get_all_by_label(pick(lang, "80 to 85 kg", "80 до 85 кг")).count(), 5, "{lang:?}");
+        six.get_by_label(pick(lang, "and 1 more", "и ещё 1"));
+
+        // Five fit; the card then says nothing of the rest.
+        let (app, _handles) = app_with_workouts(lang, &six_can_add(5));
+        let five = harness(app);
+        assert_eq!(five.get_all_by_label(pick(lang, "80 to 85 kg", "80 до 85 кг")).count(), 5, "{lang:?}");
+        assert!(five.query_by_label_contains(pick(lang, "more", "ещё")).is_none(), "{lang:?}");
+    }
+}
+
+#[test]
+fn the_button_opens_progress_on_the_exercises_that_can_add() {
+    for lang in Lang::ALL {
+        let (mut app, _handles) = app_with_workouts(lang, &two_can_add());
+        // An exercise left open on Progress, and the chip of another filter, give way.
+        app.open_exercise(Some("squat".to_owned()));
+        app.ui.progress.filter = ProgressFilter::Break;
+        let mut harness = harness(app);
+        click(&mut harness, pick(lang, "Open progress", "Открыть прогресс"));
+        let ui = &harness.state().ui;
+        assert_eq!((ui.section, ui.progress.filter, ui.progress.open.as_deref()), (Section::Progress, ProgressFilter::Add, None), "{lang:?}");
+        // The tiles of the two, and no other.
+        harness.get_by_role_and_label(Role::Button, "Squat");
+        harness.get_by_role_and_label(Role::Button, "Deadlift");
+        assert!(harness.query_by_role_and_label(Role::Button, "Bench press").is_none(), "{lang:?}");
+    }
+}
+
+#[test]
+fn the_card_follows_the_data() {
+    let (app, _handles) = app_with_workouts(Lang::En, &two_can_add());
+    let mut harness = harness(app);
+    harness.get_by_label("Can add weight: 2 exercises");
+    // The last squat is left out of the statistics: one session is no advice, and the card counts one exercise.
+    harness.state_mut().run("activity.setExcluded", json!({ "id": 7_100_003, "excluded": true })).expect("leave the workout out");
+    harness.run();
+    harness.get_by_label("Can add weight: 1 exercise");
+    assert!(harness.query_by_label("Squat").is_none());
+    harness.get_by_label("Deadlift");
 }

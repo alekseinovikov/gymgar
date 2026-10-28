@@ -424,6 +424,34 @@ pub fn advice_title(ui: &mut Ui, text: &str, tone: Tone) {
     });
 }
 
+/// A line that points to the advice to add weight: the up-chevron and `text`, both in the accent colour, as wide as the text
+/// and cut with an ellipsis where the space is short. The text is underlined while the pointer is over it. A link for
+/// screen readers; the caller acts on the click.
+pub fn advice_link(ui: &mut Ui, text: &str) -> Response {
+    let t = Tokens::get(ui.ctx());
+    // Painted under the text once the pointer is known.
+    let underline = ui.painter().add(Shape::Noop);
+    // A line of text, not a row of controls: as high as its text, which the chevron is centred on.
+    let line = ui.text_style_height(&TextStyle::Body);
+    let row = ui
+        .scope(|ui| {
+            ui.spacing_mut().interact_size.y = line;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = metrics::CHEVRON_GAP;
+                up_chevron(ui, t.accent, 1.0);
+                ui.add(Label::new(RichText::new(text).color(t.accent)).truncate().selectable(false))
+            })
+        })
+        .inner;
+    let response = ui.interact(row.response.rect, row.response.id.with("advice-link"), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Link, ui.is_enabled(), text));
+    if response.hovered() || response.has_focus() {
+        let label = row.inner.rect;
+        ui.painter().set(underline, Shape::hline(label.x_range(), label.bottom(), Stroke::new(1.0, t.accent)));
+    }
+    response.on_hover_cursor(CursorIcon::PointingHand)
+}
+
 /// A chevron pointing up: two strokes meeting at its apex, the width and height of the metrics times `scale`.
 fn up_chevron(ui: &mut Ui, color: Color32, scale: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(metrics::CHEVRON_WIDTH, metrics::CHEVRON_HEIGHT) * scale, Sense::hover());

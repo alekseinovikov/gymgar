@@ -557,6 +557,36 @@ fn the_title_of_the_advice_is_a_heading_in_the_colour_of_its_tone_and_the_accent
 }
 
 #[test]
+fn an_advice_link_is_a_link_with_an_up_chevron_in_the_accent_colour_and_takes_clicks() {
+    let text = "Can add: 85 kg · open progress";
+    let mut harness = ui_harness(|ui, clicks: &mut u32| *clicks += u32::from(advice_link(ui, text).clicked()), 0);
+    harness.run();
+    let t = Tokens::SPORT;
+    // A link for screen readers, as wide as what it says rather than as its space, with the text and the chevron in the accent.
+    let link = harness.get_by_role_and_label(Role::Link, text).rect();
+    assert!(link.width() < 400.0, "as wide as its text: {link:?}");
+    assert_eq!(text_colour(&harness, text), Some(t.accent));
+    let drawn = chevrons(&harness, t.accent);
+    let [chevron] = drawn.as_slice() else { panic!("one chevron expected, got {drawn:?}") };
+    let [left, apex, right] = chevron.as_slice() else { panic!("three points") };
+    // The text itself (the link too is labelled with it for screen readers).
+    let label = harness.get_by(|node| node.role() == Role::Label && node.value().as_deref() == Some(text)).rect();
+    assert!(apex.y < left.y && apex.y < right.y && right.x < label.left() && left.y < label.bottom() && apex.y > label.top(), "{chevron:?} before {label:?}");
+    // Quiet until the pointer is over it: then the text is underlined, and the pointer is a hand.
+    let underlined = |harness: &egui_kittest::Harness<'_, u32>| {
+        harness.output().shapes.iter().any(|clipped| matches!(&clipped.shape, Shape::LineSegment { points, .. } if (points[0].y - label.bottom()).abs() < 1.0))
+    };
+    assert!(!underlined(&harness));
+    harness.hover_at(link.center());
+    harness.run();
+    assert!(underlined(&harness), "the text is underlined under the pointer");
+    assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand);
+    harness.get_by_role_and_label(Role::Link, text).click();
+    harness.run();
+    assert_eq!(*harness.state(), 1);
+}
+
+#[test]
 fn a_clickable_row_is_as_wide_as_its_space_takes_clicks_and_lights_under_the_pointer() {
     let t = Tokens::SPORT;
     let mut harness = ui_harness(

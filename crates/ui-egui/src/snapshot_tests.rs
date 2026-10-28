@@ -9,7 +9,8 @@
 //! Without `GYMGAR_SNAPSHOTS` it writes nothing. It draws the real app (its `logic` and `ui`), 1200x800 points at a
 //! scale of 2, in English and in Russian: `<state>-en.png` and `<state>-ru.png` (`progress-*` is the Progress section: the
 //! tiles of every status, at both sizes, with a chip chosen, and with nothing to show; `progress-detail-*` the page of an
-//! exercise). The Activities screen and the Summary
+//! exercise; `summary-can-add*` the Summary with the card of what can take more weight and `detail-can-add*` an open
+//! workout whose exercise can). The Activities screen and the Summary
 //! with activities are drawn at the smallest window too, 800x500: `<state>-800-<lang>.png`; so is the open activity
 //! (`detail-*`): a strength workout with corrections, another activity, and the three states without sets; and the
 //! correcting of it (`edit-*`): the line of a set open in the editor, its error, and the exercise picker.
@@ -269,6 +270,32 @@ fn progress_app(lang: Lang) -> (GymgarApp, gymgar_engine::testing::TestHandles) 
     app_on_store(lang, store)
 }
 
+/// The open workout that points to the advice: Romanian deadlifts of 70 kg for the 10 reps asked, twice, so they can add
+/// weight, and bench presses that went from 90 kg to 95 kg and 8 reps, which hold. Both are in the two workouts, the latter
+/// being the one to open (activity `ADVICE_WORKOUT`).
+const ADVICE_WORKOUT: i64 = 7_400_002;
+
+fn advice_workout_app(lang: Lang) -> (GymgarApp, gymgar_engine::testing::TestHandles) {
+    let now = progress_now();
+    let store = Store::open_in_memory().expect("an in-memory store");
+    let deadlift = exercise(8, Some(23));
+    let bench = exercise(0, Some(1));
+    let titles = || vec![(deadlift, "Румынская становая тяга".to_owned()), (bench, "Жим штанги лёжа".to_owned())];
+    let workout = |days: i64, bench_kg: f64, bench_reps: u32| {
+        vec![
+            strength_set(0, deadlift, 70.0, 10, Some(10)),
+            strength_set(1, deadlift, 70.0, 10, Some(10)),
+            strength_set(2, bench, bench_kg, bench_reps, Some(10)),
+            strength_set(3, bench, bench_kg, bench_reps, Some(10)),
+        ]
+        .into_iter()
+        .map(move |set| RecordedSet { start: now - TimeDelta::days(days) + TimeDelta::minutes(i64::from(set.message_index) * 4), ..set })
+    };
+    seed_titled_workout(&store, ADVICE_WORKOUT - 1, now - TimeDelta::days(24), workout(24, 90.0, 10).collect(), titles());
+    seed_titled_workout(&store, ADVICE_WORKOUT, now - TimeDelta::days(3), workout(3, 95.0, 8).collect(), titles());
+    app_on_store(lang, store)
+}
+
 /// A Garmin that lists `count` strength workouts and sends a broken file for each: a sync with plenty of files to count.
 fn garmin_with_files(count: i64) -> Arc<FakeGarminSession> {
     let garmin = Arc::new(FakeGarminSession::new());
@@ -331,6 +358,15 @@ fn render_snapshots() {
         save(&mut window(app, Section::Progress), &directory, "progress-empty", lang);
         let (app, _handles) = app_in(lang, on_hold());
         save(&mut window(app, Section::Progress), &directory, "progress-empty-not-connected", lang);
+        // The Summary with the card of the exercises that can take more weight (three of eleven), at both sizes; and the open
+        // workout whose deadlift can, with the bench press of the same workout holding, so one card has the line and one has not.
+        for (size, suffix) in SIZES {
+            let (app, _handles) = progress_app(lang);
+            save(&mut window_sized(app, Section::Summary, size), &directory, &format!("summary-can-add{suffix}"), lang);
+            let (mut app, _handles) = advice_workout_app(lang);
+            app.ui.activities.selected = Some(ADVICE_WORKOUT);
+            save(&mut window_sized(app, Section::Activities, size), &directory, &format!("detail-can-add{suffix}"), lang);
+        }
         // The page of an exercise: one that can add weight, one with circles and two shaded breaks (at both sizes), one that
         // came back after a break, one with no weight (a chart of reps) and one on a break that is going on.
         for (state, title, sizes) in [

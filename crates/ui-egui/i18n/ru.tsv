@@ -295,3 +295,13 @@ Bodyweight exercise	Упражнение без веса
 The chart shows reps.	График показывает повторы.
 No target in the program	Нет цели по программе
 The advice will appear once the exercise is in a program that plans reps.	Подсказка появится, когда упражнение пойдёт по программе с повторами в плане.
+
+# Pointing to the advice: the card of the Summary and the line in a workout (exercise progress spec section 2, items 4 and 5).
+# The Russian title of the card is the spec's: "Можно добавлять: 2 упражнения". "и ещё {}" needs no noun, so it does not decline.
+Can add weight: {} exercise	Можно добавлять: {} упражнение
+Can add weight: {} exercises (2 to 4)	Можно добавлять: {} упражнения
+Can add weight: {} exercises	Можно добавлять: {} упражнений
+{from} to {to}	{from} до {to}
+and {} more	и ещё {}
+Open progress	Открыть прогресс
+open progress	открыть прогресс

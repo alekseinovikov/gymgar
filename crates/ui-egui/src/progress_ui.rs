@@ -10,7 +10,7 @@
 
 use egui::{Label, RichText, Role, ScrollArea, Ui, WidgetInfo, vec2};
 use gymgar_domain::ConnectionStatus;
-use gymgar_engine::{AdviceKind, ProgressItemView, WorkingView};
+use gymgar_engine::{AdviceKind, AdviceView, ProgressItemView, WorkingView};
 
 use crate::activity_detail_ui::exercise_name;
 use crate::i18n::trn;
@@ -169,6 +169,15 @@ pub(crate) fn working_text(last: &WorkingView, _chart_reps: Option<u16>) -> Stri
     }
     let reps: Vec<String> = earlier.iter().map(u16::to_string).collect();
     format!("{}, {unit}", reps.join(", "))
+}
+
+/// "Can add: 85 kg", the heading of the advice to add weight wherever it is shown; the bare "Can add weight" for an answer
+/// without the weight to go to.
+pub(crate) fn can_add_title(advice: &AdviceView) -> String {
+    match advice.next_weight_kg {
+        Some(weight) => tl!("Can add: {}").replace("{}", &numbers::kg(weight)),
+        None => tl!("Can add weight").to_owned(),
+    }
 }
 
 /// The status of a tile in a word or two. After a break it says so whatever the reps were, since the first session after

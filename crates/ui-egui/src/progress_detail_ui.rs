@@ -12,7 +12,7 @@ use gymgar_engine::{AdviceKind, ProgressItemView, ProgressView, SessionView, Set
 
 use crate::activity_detail_ui::exercise_name;
 use crate::i18n::trn;
-use crate::progress_ui::{advice_tone, working_text};
+use crate::progress_ui::{advice_tone, can_add_title, working_text};
 use crate::theme::{Tokens, metrics};
 use crate::widgets::Tone;
 use crate::{GymgarApp, dates, numbers, progress_chart, tl, widgets};
@@ -235,10 +235,7 @@ pub(crate) fn advice_texts(view: &ProgressView) -> Option<(String, String)> {
 /// "Can add: 85 kg", and the two sessions it rests on and what to expect with the new weight.
 fn add_texts(item: &ProgressItemView, year: i32) -> (String, String) {
     let advice = &item.advice;
-    let title = match advice.next_weight_kg {
-        Some(weight) => tl!("Can add: {}").replace("{}", &numbers::kg(weight)),
-        None => tl!("Can add weight").to_owned(),
-    };
+    let title = can_add_title(advice);
     let first = match advice.basis.as_slice() {
         [previous, last] => fill(
             tl!("{working} two sessions in a row — {dates}."),
