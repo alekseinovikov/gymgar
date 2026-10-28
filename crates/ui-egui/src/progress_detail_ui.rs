@@ -39,7 +39,10 @@ pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
         action = Some(Action::Back);
     }
     ui.add_space(metrics::GAP);
-    ScrollArea::vertical().id_salt("progress-detail").auto_shrink(false).show(ui, |ui| match app.progress_detail() {
+    // Each exercise keeps its own scroll: a page opened after another starts at its top, and one come back to (from a
+    // workout, say) is where it was left.
+    let key = app.ui.progress.open.clone().unwrap_or_default();
+    ScrollArea::vertical().id_salt(("progress-detail", key)).auto_shrink(false).show(ui, |ui| match app.progress_detail() {
         Some(view) => action = action.or(page(ui, view)),
         None => unavailable(app, ui),
     });

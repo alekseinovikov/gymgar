@@ -593,3 +593,58 @@ fn hovering_a_point_says_the_day_the_weight_and_the_reps() {
         harness.get_by_label(text);
     }
 }
+
+/// The top of the heading `name`, where the page begins: the page is scrolled when it is above where it began.
+fn heading_top(harness: &Harness<'_, GymgarApp>, name: &str) -> f32 {
+    harness.get_by_role_and_label(Role::Heading, name).rect().top()
+}
+
+/// Scrolls the open page down to its sessions.
+fn scroll_to_the_sessions(harness: &mut Harness<'_, GymgarApp>, lang: Lang) {
+    harness.get_by_role_and_label(Role::Heading, pick(lang, "Sessions", "Занятия")).scroll_to_me();
+    harness.run();
+}
+
+#[test]
+fn each_exercise_page_keeps_its_scroll_to_itself() {
+    // A deadlift as well as the squat, each with sessions below the chart; a window so low that both pages scroll.
+    let deadlift = |kg: f64| vec![strength_set(0, ExerciseId { category: 8, name: Some(23) }, kg, 10, Some(10))];
+    let mut workouts = squats();
+    workouts.extend([
+        ("2026-08-10 09:00:00", Some("Pull"), deadlift(60.0)),
+        ("2026-08-31 09:00:00", Some("Pull"), deadlift(60.0)),
+        ("2026-09-21 09:00:00", Some("Pull"), deadlift(65.0)),
+        ("2026-10-12 09:00:00", Some("Pull"), deadlift(65.0)),
+        ("2026-10-26 09:00:00", Some("Pull"), deadlift(65.0)),
+    ]);
+    for lang in Lang::ALL {
+        let (app, _handles) = app_with_workouts(lang, &workouts);
+        let mut harness = harness_at_size(app, egui::vec2(1200.0, 500.0));
+        let (squat, pull) = (pick(lang, "Squat", "Squat"), pick(lang, "Romanian deadlift", "Romanian deadlift"));
+
+        // The squat page, scrolled down to its sessions: its title has gone up out of the window.
+        click(&mut harness, squat);
+        let top = heading_top(&harness, squat);
+        scroll_to_the_sessions(&mut harness, lang);
+        assert!(heading_top(&harness, squat) < top - 100.0, "{lang:?}: the squat page is scrolled");
+
+        // Another exercise opens at the top, not where the squat was left.
+        click(&mut harness, pick(lang, "Back", "Назад"));
+        click(&mut harness, pull);
+        assert_eq!(heading_top(&harness, pull), top, "{lang:?}: the deadlift page begins at its top");
+        // Its own scroll is its own: down to its sessions, to a workout and back to Progress.
+        scroll_to_the_sessions(&mut harness, lang);
+        let scrolled = heading_top(&harness, pull);
+        assert!(scrolled < top - 100.0, "{lang:?}: the deadlift page is scrolled");
+        click(&mut harness, pick(lang, "26 October", "26 октября"));
+        assert_eq!(harness.state().ui.section, Section::Activities, "{lang:?}");
+        harness.state_mut().ui.section = Section::Progress;
+        harness.run();
+        assert_eq!(heading_top(&harness, pull), scrolled, "{lang:?}: coming back from a workout leaves the page where it was");
+
+        // And the squat page, opened again, is where the squat was left.
+        click(&mut harness, pick(lang, "Back", "Назад"));
+        click(&mut harness, squat);
+        assert!(heading_top(&harness, squat) < top - 100.0, "{lang:?}: the squat page kept its own scroll");
+    }
+}
