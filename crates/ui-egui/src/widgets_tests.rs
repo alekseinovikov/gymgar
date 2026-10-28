@@ -530,6 +530,61 @@ fn a_status_label_that_asks_to_add_has_an_up_chevron_before_its_text() {
     assert!(chevrons(&harness, t.text_dim).is_empty() && chevrons(&harness, t.warning).is_empty());
 }
 
+#[test]
+fn the_title_of_the_advice_is_a_heading_in_the_colour_of_its_tone_and_the_accent_one_has_a_chevron() {
+    let mut harness = ui_harness(
+        |ui, _: &mut ()| {
+            advice_title(ui, "Can add: 85 kg", Tone::Accent);
+            advice_title(ui, "Hold 90 kg", Tone::Dim);
+            advice_title(ui, "Break 10 weeks", Tone::Warning);
+        },
+        (),
+    );
+    harness.run();
+    let t = Tokens::SPORT;
+    for (text, color) in [("Can add: 85 kg", t.accent), ("Hold 90 kg", t.text), ("Break 10 weeks", t.warning)] {
+        harness.get_by_role_and_label(Role::Heading, text);
+        assert_eq!(text_colour(&harness, text), Some(color), "{text}");
+    }
+    // The chevron is before the text of the one that asks to add, and bigger than the one of a status label.
+    let text = harness.get_by_label("Can add: 85 kg").rect();
+    let drawn = chevrons(&harness, t.accent);
+    let [chevron] = drawn.as_slice() else { panic!("one chevron expected, got {drawn:?}") };
+    let [left, apex, right] = chevron.as_slice() else { panic!("three points") };
+    assert!(right.x < text.left() && apex.y > text.top() && left.y < text.bottom(), "before the text, at its height: {chevron:?} vs {text:?}");
+    assert!(right.x - left.x > metrics::CHEVRON_WIDTH, "larger than a label's: {chevron:?}");
+    assert!(chevrons(&harness, t.text).is_empty() && chevrons(&harness, t.warning).is_empty());
+}
+
+#[test]
+fn a_clickable_row_is_as_wide_as_its_space_takes_clicks_and_lights_under_the_pointer() {
+    let t = Tokens::SPORT;
+    let mut harness = ui_harness(
+        |ui, clicks: &mut u32| {
+            let response = clickable_row(ui, 30.0, |ui| {
+                ui.label("Inside the row");
+            });
+            response.widget_info(|| WidgetInfo::labeled(Role::Button, true, "A row"));
+            *clicks += u32::from(response.clicked());
+        },
+        0,
+    );
+    harness.get_by_label("Inside the row");
+    let row = harness.get_by_role_and_label(Role::Button, "A row").rect();
+    assert_eq!(row.height(), 30.0);
+    assert!(row.width() > 1000.0, "the width of the window, less its margins: {row:?}");
+    // Quiet until the pointer is over it.
+    let lit = |harness: &egui_kittest::Harness<'_, u32>| painted_rects(harness).iter().any(|(fill, _, _)| *fill == t.edit_row);
+    assert!(!lit(&harness));
+    harness.hover_at(row.center());
+    harness.run();
+    assert!(lit(&harness), "the backing shows under the pointer");
+    // A click anywhere on it, over its content too, is a click on the row.
+    harness.get_by_role_and_label(Role::Button, "A row").click();
+    harness.run();
+    assert_eq!(*harness.state(), 1);
+}
+
 /// The size the sparkline tests give the chart.
 const SPARK: egui::Vec2 = egui::vec2(120.0, metrics::SPARKLINE_HEIGHT);
 

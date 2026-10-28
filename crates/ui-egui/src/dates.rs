@@ -4,7 +4,9 @@
 //! the Russian side of the catalog holds the genitive (`октября`), not the nominative. A date is written day, month,
 //! year in both languages, and the time on a 24-hour clock, which no reader mistakes for another. The activity list
 //! adds a short form (`Thu, 23 Oct`) and the name of a week (`13–19 October`); a week starts on Monday. The open
-//! activity names its day in full (`Thursday, 23 October 2026`).
+//! activity names its day in full (`Thursday, 23 October 2026`). The page of an exercise says a day without its year
+//! (`18 August`) while it is the year of the latest session, two days of a month together (`2 and 18 August`), the month
+//! with its year (`March 2024`) and the month alone on the axis of its chart (`Aug`).
 
 use chrono::{Datelike, Days, NaiveDate, NaiveDateTime, Timelike, Weekday};
 
@@ -99,6 +101,36 @@ fn weekday_long(day: Weekday) -> &'static str {
 /// `Thursday, 23 October 2026`: the day of the activity that is open.
 pub(crate) fn long_date(day: NaiveDate) -> String {
     format!("{}, {} {} {}", weekday_long(day.weekday()), day.day(), month_name(day.month()), day.year())
+}
+
+/// `18 August`: a day whose year the reader knows from what stands around it (`this_year`). A day of another year says
+/// which: `18 August 2025`.
+pub(crate) fn day_month(day: NaiveDate, this_year: i32) -> String {
+    let text = format!("{} {}", day.day(), month_name(day.month()));
+    if day.year() == this_year { text } else { format!("{text} {}", day.year()) }
+}
+
+/// `March 2024`: the month a count started in. The Russian side is the genitive (`марта 2024`), which follows the `с` it
+/// stands after.
+pub(crate) fn month_year(day: NaiveDate) -> String {
+    format!("{} {}", month_name(day.month()), day.year())
+}
+
+/// Two days that follow each other in a sentence: `2 and 18 August` when they are in one month, else each in full
+/// (`28 July and 18 August`). A day of another year than `this_year` says which, as in [`day_month`].
+pub(crate) fn two_days(first: NaiveDate, second: NaiveDate, this_year: i32) -> String {
+    let (first, second) = if first.year() == second.year() && first.month() == second.month() {
+        (first.day().to_string(), day_month(second, this_year))
+    } else {
+        (day_month(first, this_year), day_month(second, this_year))
+    };
+    tl!("{} and {}").replacen("{}", &first, 1).replacen("{}", &second, 1)
+}
+
+/// The short name of month `month` (1 to 12) standing alone, as a label on the axis of a chart. It is [`month_short`]
+/// but for May: a date has Russian `мая` (genitive), a label with no day beside it is `май`.
+pub(crate) fn month_label(month: u32) -> &'static str {
+    if month == 5 { tl!("May|label") } else { month_short(month) }
 }
 
 /// The Monday of the week `day` is in. The first day the calendar has stands for its own week.

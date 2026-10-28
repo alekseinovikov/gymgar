@@ -117,3 +117,48 @@ fn a_long_date_names_the_day_of_the_week() {
     let week: Vec<String> = (19..=25).map(|d| long_date(day(d))).collect();
     assert_eq!(week.iter().collect::<std::collections::HashSet<_>>().len(), 7, "{week:?}");
 }
+
+#[test]
+fn a_day_without_its_year_says_it_only_when_it_is_not_this_year() {
+    i18n::set_current(Lang::En);
+    assert_eq!(day_month(day(2026, 8, 18), 2026), "18 August");
+    assert_eq!(day_month(day(2025, 12, 29), 2026), "29 December 2025");
+    i18n::set_current(Lang::Ru);
+    assert_eq!(day_month(day(2026, 8, 18), 2026), "18 августа");
+    assert_eq!(day_month(day(2025, 12, 29), 2026), "29 декабря 2025");
+}
+
+#[test]
+fn a_month_with_its_year_follows_the_since() {
+    i18n::set_current(Lang::En);
+    assert_eq!(month_year(day(2024, 3, 2)), "March 2024");
+    i18n::set_current(Lang::Ru);
+    assert_eq!(month_year(day(2024, 3, 2)), "марта 2024");
+}
+
+#[test]
+fn two_days_share_their_month_when_they_have_one() {
+    i18n::set_current(Lang::En);
+    assert_eq!(two_days(day(2026, 8, 2), day(2026, 8, 18), 2026), "2 and 18 August");
+    assert_eq!(two_days(day(2026, 7, 28), day(2026, 8, 18), 2026), "28 July and 18 August");
+    assert_eq!(two_days(day(2025, 12, 29), day(2026, 1, 5), 2026), "29 December 2025 and 5 January");
+    assert_eq!(two_days(day(2025, 8, 2), day(2025, 8, 18), 2026), "2 and 18 August 2025", "the year once, at the end");
+    // The same month of two different years is not one month.
+    assert_eq!(two_days(day(2025, 8, 2), day(2026, 8, 18), 2026), "2 August 2025 and 18 August");
+    i18n::set_current(Lang::Ru);
+    assert_eq!(two_days(day(2026, 8, 2), day(2026, 8, 18), 2026), "2 и 18 августа");
+    assert_eq!(two_days(day(2026, 7, 28), day(2026, 8, 18), 2026), "28 июля и 18 августа");
+}
+
+#[test]
+fn a_month_label_is_the_short_name_and_russian_may_stands_alone() {
+    let labels = |lang| {
+        i18n::set_current(lang);
+        (1..=12).map(month_label).collect::<Vec<_>>()
+    };
+    assert_eq!(labels(Lang::En), ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]);
+    // `май`, not the `мая` of a date.
+    assert_eq!(labels(Lang::Ru), ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]);
+    assert_eq!(month_label(0), "");
+    assert_eq!(month_label(13), "");
+}

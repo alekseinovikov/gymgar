@@ -175,6 +175,30 @@ pub mod metrics {
     pub const CHEVRON_HEIGHT: f32 = 5.0;
     pub const CHEVRON_STROKE: f32 = 1.6;
     pub const CHEVRON_GAP: f32 = 4.0;
+    /// How much larger the chevron before the title of the advice card is than the one in a tile's status label.
+    pub const CHEVRON_TITLE_SCALE: f32 = 1.6;
+    /// The advice card of an exercise's page: the widest its text runs before it wraps (a line across a wide window is
+    /// hard to read).
+    pub const ADVICE_TEXT_MAX_WIDTH: f32 = 680.0;
+    /// The chart of an exercise: its height, the radius of a point, the width of its line, the length of a dash of the
+    /// line across a break, how much of the warning colour a break is shaded with, the fewest months the axis spans, the
+    /// fewest points between two lines of the weight grid and between two labels of the months, and the size of a swatch
+    /// of its legend.
+    pub const CHART_HEIGHT: f32 = 220.0;
+    pub const CHART_POINT_RADIUS: f32 = 4.0;
+    pub const CHART_LINE_WIDTH: f32 = 2.2;
+    pub const CHART_DASH: f32 = 6.0;
+    pub const GAP_OPACITY: f32 = 0.09;
+    pub const CHART_MIN_MONTHS: f64 = 6.0;
+    pub const CHART_GRID_SPACING: f32 = 32.0;
+    pub const CHART_MONTH_SPACING: f32 = 56.0;
+    pub const LEGEND_SWATCH: f32 = 10.0;
+    /// A session in the list under the chart: its height, the width of its date and of its working set, and the share of
+    /// what is left that its program takes (the sets take the rest).
+    pub const SESSION_ROW_HEIGHT: f32 = 30.0;
+    pub const SESSION_DATE_WIDTH: f32 = 124.0;
+    pub const SESSION_WORKING_WIDTH: f32 = 150.0;
+    pub const SESSION_PROGRAM_SHARE: f32 = 0.3;
 }
 
 fn tokens_id() -> Id {

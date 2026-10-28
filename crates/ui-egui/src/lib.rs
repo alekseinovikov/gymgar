@@ -12,6 +12,8 @@ mod garmin_ui;
 pub mod i18n;
 pub mod icons;
 mod numbers;
+mod progress_chart;
+mod progress_detail_ui;
 mod progress_ui;
 mod rail;
 mod set_edit_ui;

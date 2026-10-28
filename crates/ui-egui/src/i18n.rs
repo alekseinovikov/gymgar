@@ -95,10 +95,15 @@ fn catalog() -> &'static HashMap<&'static str, &'static str> {
 }
 
 /// The text in the current language. A text the catalog does not have is shown in English, which beats a gap.
+///
+/// A literal may end in `|context`, which tells apart two uses of one English text that another language says
+/// differently (`May` in a date is `мая`, and the label of a month alone is `май`: `May|label`). English shows the text
+/// without the context, and so does a language that has no line for it.
 pub fn t(text: &'static str) -> &'static str {
+    let plain = || text.split_once('|').map_or(text, |(plain, _)| plain);
     match current() {
-        Lang::En => text,
-        Lang::Ru => catalog().get(text).copied().unwrap_or(text),
+        Lang::En => plain(),
+        Lang::Ru => catalog().get(text).copied().unwrap_or_else(plain),
     }
 }
 

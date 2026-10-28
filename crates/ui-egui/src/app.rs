@@ -340,13 +340,11 @@ impl GymgarApp {
     }
 
     /// The open exercise, as last read; `None` when none is open or it could not be read.
-    #[allow(dead_code, reason = "the Progress screens that call it come with the next tasks")]
     pub(crate) fn progress_detail(&self) -> Option<&ProgressView> {
         self.progress_detail.as_ref()
     }
 
     /// Why the open exercise could not be read, in the user's language.
-    #[allow(dead_code, reason = "the Progress screens that call it come with the next tasks")]
     pub(crate) fn progress_detail_error(&self) -> Option<&str> {
         self.progress_detail_error.as_deref()
     }
@@ -359,7 +357,6 @@ impl GymgarApp {
 
     /// Opens the activity `id` in Activities, from a session or a point of an exercise's page: the whole list, the activity
     /// selected and read, its "new" mark taken off as when the list selects it. The exercise open on Progress stays open.
-    #[allow(dead_code, reason = "the Progress screens that call it come with the next tasks")]
     pub(crate) fn open_activity(&mut self, id: i64) {
         self.ui.section = Section::Activities;
         self.ui.activities.filter = ListFilter::All;

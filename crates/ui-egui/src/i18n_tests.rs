@@ -84,6 +84,18 @@ fn t_translates_for_russian_and_keeps_english_as_is() {
 }
 
 #[test]
+fn a_context_tells_apart_two_uses_of_one_text_and_english_never_shows_it() {
+    set_current(Lang::En);
+    assert_eq!(t("May"), "May");
+    assert_eq!(t("May|label"), "May", "English shows the text without its context");
+    set_current(Lang::Ru);
+    assert_eq!(t("May"), "мая", "the month inside a date");
+    assert_eq!(t("May|label"), "май", "the month alone");
+    // A context with no line says the text, not the context.
+    assert_eq!(t("Nothing here|in no catalog"), "Nothing here");
+}
+
+#[test]
 fn a_text_without_a_translation_stays_english() {
     set_current(Lang::Ru);
     assert_eq!(t("This text is in no catalog"), "This text is in no catalog");

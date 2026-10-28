@@ -5,8 +5,8 @@
 //! accessible name (`Response::labelled_by` on the visible label).
 
 use egui::{
-    Align2, Area, Button, Color32, ComboBox, Context, CursorIcon, Frame, Id, Label, Link, Margin, OpenUrl, Order, Pos2, Response, RichText, Role, Sense, Shape,
-    Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, Ui, UiKind, Vec2, WidgetInfo, WidgetText, pos2, vec2,
+    Align, Align2, Area, Button, Color32, ComboBox, Context, CursorIcon, Frame, Id, Label, Layout, Link, Margin, OpenUrl, Order, Pos2, Response, RichText,
+    Role, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, UiKind, Vec2, WidgetInfo, WidgetText, pos2, vec2,
 };
 
 use crate::theme::{Tokens, metrics};
@@ -398,22 +398,62 @@ pub fn advice_label(ui: &mut Ui, text: &str, tone: Tone) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = metrics::CHEVRON_GAP;
                 if tone == Tone::Accent {
-                    up_chevron(ui, color);
+                    up_chevron(ui, color, 1.0);
                 }
                 ui.add(Label::new(label).truncate().selectable(false));
             });
         });
 }
 
-/// A chevron pointing up: two strokes meeting at its apex, the width and height of the metrics.
-fn up_chevron(ui: &mut Ui, color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(vec2(metrics::CHEVRON_WIDTH, metrics::CHEVRON_HEIGHT), Sense::hover());
+/// The title of the advice card on an exercise's page: what to do in a few words, in the colour of its `tone` (the text
+/// colour for [`Tone::Dim`]), with the up-chevron before it for the accent one. A heading for screen readers.
+pub fn advice_title(ui: &mut Ui, text: &str, tone: Tone) {
+    let t = Tokens::get(ui.ctx());
+    let color = match tone {
+        Tone::Accent => t.accent,
+        Tone::Dim => t.text,
+        Tone::Warning => t.warning,
+    };
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = metrics::CHEVRON_GAP * 2.0;
+        if tone == Tone::Accent {
+            up_chevron(ui, color, metrics::CHEVRON_TITLE_SCALE);
+        }
+        let response = ui.add(Label::new(RichText::new(text).size(metrics::CARD_TITLE_SIZE).color(color).strong()).selectable(false));
+        response.widget_info(|| WidgetInfo::labeled(Role::Heading, ui.is_enabled(), text));
+    });
+}
+
+/// A chevron pointing up: two strokes meeting at its apex, the width and height of the metrics times `scale`.
+fn up_chevron(ui: &mut Ui, color: Color32, scale: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(metrics::CHEVRON_WIDTH, metrics::CHEVRON_HEIGHT) * scale, Sense::hover());
     if ui.is_rect_visible(rect) {
         // Room for the thickness of the line, so it does not touch the edge of its rectangle.
         let rect = rect.shrink(metrics::CHEVRON_STROKE / 2.0);
         let points = vec![rect.left_bottom(), pos2(rect.center().x, rect.top()), rect.right_bottom()];
         ui.painter().add(Shape::line(points, Stroke::new(metrics::CHEVRON_STROKE, color)));
     }
+}
+
+/// A line of a list that a click opens: as wide as the space it is given and `height` high, with a hairline under it and
+/// a backing that shows while the pointer is over it. `add` draws its content from the left, centred on the line. The
+/// caller names it for screen readers with `Response::widget_info` and acts on the click.
+pub fn clickable_row(ui: &mut Ui, height: f32, add: impl FnOnce(&mut Ui)) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    if ui.is_rect_visible(rect) {
+        if response.hovered() {
+            ui.painter().rect_filled(rect, t.radius_control, t.edit_row);
+        }
+        ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, t.border));
+        if response.has_focus() {
+            ui.painter().rect_stroke(rect, t.radius_control, Stroke::new(1.5, t.accent), StrokeKind::Inside);
+        }
+    }
+    let inner = rect.shrink2(vec2(metrics::ROW_PADDING, 0.0));
+    let mut content = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)));
+    add(&mut content);
+    response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
 /// A line through `values`, old to new, spread over `size` from its left edge to its right and from the lowest value at

@@ -8,7 +8,8 @@
 //!
 //! Without `GYMGAR_SNAPSHOTS` it writes nothing. It draws the real app (its `logic` and `ui`), 1200x800 points at a
 //! scale of 2, in English and in Russian: `<state>-en.png` and `<state>-ru.png` (`progress-*` is the Progress section: the
-//! tiles of every status, at both sizes, with a chip chosen, and with nothing to show). The Activities screen and the Summary
+//! tiles of every status, at both sizes, with a chip chosen, and with nothing to show; `progress-detail-*` the page of an
+//! exercise). The Activities screen and the Summary
 //! with activities are drawn at the smallest window too, 800x500: `<state>-800-<lang>.png`; so is the open activity
 //! (`detail-*`): a strength workout with corrections, another activity, and the three states without sets; and the
 //! correcting of it (`edit-*`): the line of a set open in the editor, its error, and the exercise picker.
@@ -32,8 +33,8 @@ use serde_json::{Value, json};
 use crate::activity_detail_ui::exercise_name;
 use crate::i18n::Lang;
 use crate::test_support::{
-    WINDOW, app_connected, app_in, app_on_store, app_seeded, builder, click, listed, pick, progress_now, seed_titled_workout, store_activities, tick, type_key,
-    working_connection,
+    WINDOW, app_connected, app_in, app_on_store, app_seeded, app_with_workouts, builder, click, listed, pick, progress_now, seed_titled_workout,
+    store_activities, tick, type_key, working_connection,
 };
 use crate::{GymgarApp, ProgressFilter, Section, StartupErrorApp};
 
@@ -330,6 +331,40 @@ fn render_snapshots() {
         save(&mut window(app, Section::Progress), &directory, "progress-empty", lang);
         let (app, _handles) = app_in(lang, on_hold());
         save(&mut window(app, Section::Progress), &directory, "progress-empty-not-connected", lang);
+        // The page of an exercise: one that can add weight, one with circles and two shaded breaks (at both sizes), one that
+        // came back after a break, one with no weight (a chart of reps) and one on a break that is going on.
+        for (state, title, sizes) in [
+            ("add", "Румынская становая тяга", &SIZES[..]),
+            ("hold", "Тяга штанги в наклоне", &SIZES[..]),
+            ("after-break", "Сгибание ног лёжа", &SIZES[..1]),
+            ("bodyweight", "Подтягивания", &SIZES[..1]),
+            ("break", "Сгибание рук со штангой", &SIZES[..1]),
+        ] {
+            for &(size, suffix) in sizes {
+                let (mut app, _handles) = progress_app(lang);
+                let key = app.progress().iter().find(|item| item.exercise.watch_title.as_deref() == Some(title)).map(|item| item.exercise.id.clone());
+                app.open_exercise(Some(key.expect("a tile of this exercise")));
+                save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-detail-{state}{suffix}"), lang);
+            }
+        }
+
+        // The same page with programs named and every session in view: a tall window, wide and narrow.
+        for (size, suffix) in [(egui::vec2(1200.0, 1150.0), ""), (egui::vec2(800.0, 1150.0), "-800")] {
+            let squat = ExerciseId { category: 28, name: None };
+            let sets = |kg: f64, reps: u32| vec![strength_set(0, squat, kg, reps, Some(10))];
+            let workouts = vec![
+                ("2026-07-06 08:00:00", Some("Legs"), sets(70.0, 10)),
+                ("2026-07-27 08:00:00", Some("Legs"), sets(70.0, 10)),
+                ("2026-08-17 08:00:00", Some("Legs, heavy day with the long finisher on the sled"), sets(75.0, 10)),
+                ("2026-09-07 08:00:00", Some("Legs"), sets(75.0, 10)),
+                ("2026-09-28 08:00:00", Some("Legs"), vec![strength_set(0, squat, 80.0, 10, Some(10)), strength_set(1, squat, 90.0, 6, Some(10))]),
+                ("2026-10-20 08:00:00", Some("Legs"), vec![strength_set(0, squat, 80.0, 10, Some(10)), strength_set(1, squat, 80.0, 10, Some(10))]),
+                ("2026-10-24 08:00:00", Some("Legs"), sets(80.0, 10)),
+            ];
+            let (mut app, _handles) = app_with_workouts(lang, &workouts);
+            app.open_exercise(Some("squat".to_owned()));
+            save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-detail-programs{suffix}"), lang);
+        }
 
         // 2. Settings before connecting, with the key typed and Garmin's refusal under the form.
         let cfg = TestConfig { garmin: Err(GarminAuthError::KeyRejected), ..on_hold() };

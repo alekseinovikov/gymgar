@@ -5,7 +5,8 @@
 //! exercises nobody has done for half a year last, dimmed). Clicking a tile opens its exercise.
 //!
 //! It only draws: what each tile says is the engine's answer ([`GymgarApp::progress`]). Which tiles a chip lets through, how
-//! many columns fit and how an answer reads as words are presentation, not rules of the data.
+//! many columns fit and how an answer reads as words are presentation, not rules of the data. The page an opened tile shows
+//! is [`progress_detail_ui`]'s.
 
 use egui::{Label, RichText, Role, ScrollArea, Ui, WidgetInfo, vec2};
 use gymgar_domain::ConnectionStatus;
@@ -16,12 +17,12 @@ use crate::i18n::trn;
 use crate::state::{ProgressFilter, Section};
 use crate::theme::{Tokens, metrics};
 use crate::widgets::Tone;
-use crate::{GymgarApp, numbers, tl, widgets};
+use crate::{GymgarApp, numbers, progress_detail_ui, tl, widgets};
 
 /// Draws the screen: the tiles, or the page of the exercise the user opened.
 pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
-    if let Some(key) = app.ui.progress.open.clone() {
-        open_exercise(app, ui, &key);
+    if app.ui.progress.open.is_some() {
+        progress_detail_ui::show(app, ui);
         return;
     }
     widgets::page_title(ui, tl!("Progress"), None);
@@ -33,17 +34,6 @@ pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
     chips(app, ui);
     ui.add_space(metrics::GAP);
     tiles(app, ui);
-}
-
-/// The page of an exercise: its name and the way back to the tiles.
-// The page proper (the advice, the chart, the sessions) takes this place in the next step.
-fn open_exercise(app: &mut GymgarApp, ui: &mut Ui, key: &str) {
-    let name = app.progress().iter().find(|item| item.exercise.id == key).map_or_else(|| key.to_owned(), |item| exercise_name(&item.exercise).to_owned());
-    if widgets::secondary_button(ui, tl!("Back")).clicked() {
-        app.open_exercise(None);
-    }
-    ui.add_space(metrics::GAP);
-    widgets::page_title(ui, &name, None);
 }
 
 /// Nothing to show yet: what will appear, and where to connect Garmin when it is not.

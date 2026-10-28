@@ -249,3 +249,49 @@ no target	нет цели
 No exercises here	Здесь нет упражнений
 Progress will appear here once strength workouts are loaded	Здесь появится прогресс, когда загрузятся силовые тренировки
 Back	Назад
+
+# The page of an exercise (exercise progress spec section 2, item 3, and the table of section 7). Weeks and reps decline in
+# Russian, so each has three lines. The `(2 to 4)` forms are never shown in English: they only keep the keys apart.
+{} session	{} занятие
+{} sessions (2 to 4)	{} занятия
+{} sessions	{} занятий
+{sessions} since {month}	{sessions} с {month}
+target — {}	цель — {}
+program {}	по программе {}
+No sessions of this exercise yet	У этого упражнения ещё нет занятий
+Sessions	Занятия
+Weight at {} rep	Вес на {} повтор
+Weight at {} reps (2 to 4)	Вес на {} повтора
+Weight at {} reps	Вес на {} повторов
+Reps by month	Повторы по месяцам
+Weight at {}+ reps	Вес на {}+ повторов
+Best reps of the month	Лучшие повторы месяца
+Heavier, fewer reps	Тяжелее, но меньше повторов
+Break	Перерыв
+Nothing to chart yet	Пока нечего показать на графике
+May|label	май
+{} and {}	{} и {}
+Can add: {}	Можно добавлять: {}
+Can add weight	Можно добавлять вес
+{working} two sessions in a row — {dates}.	{working} два занятия подряд — {dates}.
+{working} two sessions in a row.	{working} два занятия подряд.
+With {weight} expect about 8 reps, then build back up to {target}.	С {weight} ждите около 8 повторов, дальше снова до {target}.
+With {weight} expect a couple of reps fewer, then build back up to {target}.	С {weight} ждите на пару повторов меньше, дальше снова до {target}.
+Hold {}	Держим {}
+Hold {} for one more session	Держим {} ещё одно занятие
+{working} — {date}. Hit {target} once more and you can add weight.	{working} — {date}. Ещё раз {target} — и можно добавлять.
+Last time {working} of {target} ({date}). Add weight once you hit {target} in two sessions in a row.	Последний раз {working} из {target} ({date}). Добавлять — когда сделаете {target} два занятия подряд.
+Last time {working} with a target of {target} ({date}). Add weight once every set at this weight hits {target} in two sessions in a row.	Последний раз {working} при цели {target} ({date}). Добавлять — когда все подходы на этом весе сделают {target} два занятия подряд.
+Last time {working} ({date}).	Последний раз {working} ({date}).
+After a {}-week break, we count anew.	После перерыва в {} неделю считаем заново.
+After a {}-week break we count anew. (2 to 4)	После перерыва в {} недели считаем заново.
+After a {}-week break we count anew.	После перерыва в {} недель считаем заново.
+Before the break: {}.	До перерыва: {}.
+Break {} week	Перерыв {} неделя
+Break {} weeks (2 to 4)	Перерыв {} недели
+Break {} weeks	Перерыв {} недель
+Last session {date}: {working}. The first session after the break will be the new starting point.	Последнее занятие {date}: {working}. Первое занятие после перерыва станет новой точкой отсчёта.
+Bodyweight exercise	Упражнение без веса
+The chart shows reps.	График показывает повторы.
+No target in the program	Нет цели по программе
+The advice will appear once the exercise is in a program that plans reps.	Подсказка появится, когда упражнение пойдёт по программе с повторами в плане.
