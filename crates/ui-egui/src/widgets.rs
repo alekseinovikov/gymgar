@@ -372,8 +372,9 @@ pub enum Tone {
     Warning,
 }
 
-/// A short status in a rounded label, such as "↑ can add 85 kg" on a tile. It is as wide as its text, and a text longer
-/// than the space it is given is cut with an ellipsis.
+/// A short status in a rounded label, such as "can add 85 kg" on a tile. The accent one has a small up-chevron before its
+/// text, drawn with the painter: the bundled fonts have no arrow. It is as wide as its text, and a text longer than the
+/// space it is given is cut with an ellipsis.
 pub fn advice_label(ui: &mut Ui, text: &str, tone: Tone) {
     let t = Tokens::get(ui.ctx());
     let (fill, outline, color) = match tone {
@@ -391,8 +392,28 @@ pub fn advice_label(ui: &mut Ui, text: &str, tone: Tone) {
             if tone == Tone::Accent {
                 label = label.strong();
             }
-            ui.add(Label::new(label).truncate().selectable(false));
+            // A line of text, not a row of controls: as high as its text, which the chevron is centred on.
+            let line = WidgetText::from(label.clone()).into_galley(ui, Some(TextWrapMode::Extend), f32::INFINITY, TextStyle::Body).size().y;
+            ui.spacing_mut().interact_size.y = line;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = metrics::CHEVRON_GAP;
+                if tone == Tone::Accent {
+                    up_chevron(ui, color);
+                }
+                ui.add(Label::new(label).truncate().selectable(false));
+            });
         });
+}
+
+/// A chevron pointing up: two strokes meeting at its apex, the width and height of the metrics.
+fn up_chevron(ui: &mut Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(metrics::CHEVRON_WIDTH, metrics::CHEVRON_HEIGHT), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        // Room for the thickness of the line, so it does not touch the edge of its rectangle.
+        let rect = rect.shrink(metrics::CHEVRON_STROKE / 2.0);
+        let points = vec![rect.left_bottom(), pos2(rect.center().x, rect.top()), rect.right_bottom()];
+        ui.painter().add(Shape::line(points, Stroke::new(metrics::CHEVRON_STROKE, color)));
+    }
 }
 
 /// A line through `values`, old to new, spread over `size` from its left edge to its right and from the lowest value at

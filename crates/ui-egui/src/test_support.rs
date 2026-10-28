@@ -25,10 +25,10 @@ pub(crate) const TEST_LOCALE: &str = "en-US";
 
 /// A harness builder with the test window's size, styled and ready for icons as the real window is.
 ///
-/// A character no bundled font has is drawn as a box, not a panic: the arrows of Progress (`↑`, `←`) come from the
-/// operating system's fonts in the real window (eframe falls back to them), and a headless test has none.
+/// A character no bundled font has panics the test (egui_kittest's default), so the interface keeps to the glyphs the
+/// bundled fonts have and looks the same on every operating system.
 pub(crate) fn builder<S>() -> HarnessBuilder<S> {
-    Harness::builder().with_size(WINDOW).allow_missing_glyphs().with_context_setup(|ctx| {
+    Harness::builder().with_size(WINDOW).with_context_setup(|ctx| {
         theme::apply(ctx, &Tokens::SPORT);
         icons::install(ctx);
     })

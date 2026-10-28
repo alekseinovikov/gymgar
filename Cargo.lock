@@ -2057,7 +2057,6 @@ dependencies = [
  "egui",
  "egui_extras",
  "egui_kittest",
- "egui_system_font_provider",
  "gymgar-domain",
  "gymgar-engine",
  "gymgar-store",

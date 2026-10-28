@@ -69,13 +69,9 @@ fn window_sized(app: GymgarApp, section: Section, size: egui::Vec2) -> Shot {
     harness
 }
 
-/// The real app in a window of `size` points, not yet drawn. It has what eframe gives a real window and the harness does
-/// not: the system's fonts for the characters the bundled ones lack, such as the arrows of Progress.
+/// The real app in a window of `size` points, not yet drawn.
 fn eframe_window(app: GymgarApp, size: egui::Vec2) -> Shot {
-    builder().with_size(size).with_pixels_per_point(SCALE).wgpu().build_eframe(move |cc| {
-        cc.egui_ctx.add_font_provider(Arc::new(egui_system_font_provider::SystemFontProvider::new()));
-        app
-    })
+    builder().with_size(size).with_pixels_per_point(SCALE).wgpu().build_eframe(move |_| app)
 }
 
 /// The two window sizes of the Activities screen: the start window and the smallest one.

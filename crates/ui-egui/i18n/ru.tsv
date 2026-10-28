@@ -233,8 +233,8 @@ File	Файл
 # in English and "нед." in Russian, which does not decline.
 Can add · {}	Можно добавлять · {}
 Break · {}	Перерыв · {}
-↑ can add {}	↑ можно {}
-↑ can add	↑ можно добавлять
+can add {}	можно {}
+can add	можно добавлять
 hold · {} of {}	держим · {} из {}
 hold · one more session	держим · ещё одно занятие
 hold	держим
@@ -248,4 +248,4 @@ no target	нет цели
 {} reps	{} повторов
 No exercises here	Здесь нет упражнений
 Progress will appear here once strength workouts are loaded	Здесь появится прогресс, когда загрузятся силовые тренировки
-← Back	← Назад
+Back	Назад

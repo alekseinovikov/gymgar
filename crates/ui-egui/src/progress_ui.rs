@@ -39,7 +39,7 @@ pub(crate) fn show(app: &mut GymgarApp, ui: &mut Ui) {
 // The page proper (the advice, the chart, the sessions) takes this place in the next step.
 fn open_exercise(app: &mut GymgarApp, ui: &mut Ui, key: &str) {
     let name = app.progress().iter().find(|item| item.exercise.id == key).map_or_else(|| key.to_owned(), |item| exercise_name(&item.exercise).to_owned());
-    if widgets::secondary_button(ui, tl!("← Back")).clicked() {
+    if widgets::secondary_button(ui, tl!("Back")).clicked() {
         app.open_exercise(None);
     }
     ui.add_space(metrics::GAP);
@@ -187,8 +187,8 @@ pub(crate) fn advice_short(item: &ProgressItemView) -> String {
     let advice = &item.advice;
     match advice.kind {
         AdviceKind::Add => match advice.next_weight_kg {
-            Some(weight) => tl!("↑ can add {}").replace("{}", &numbers::kg(weight)),
-            None => tl!("↑ can add").to_owned(),
+            Some(weight) => tl!("can add {}").replace("{}", &numbers::kg(weight)),
+            None => tl!("can add").to_owned(),
         },
         AdviceKind::Hold if advice.break_days.is_some() => tl!("after a break").to_owned(),
         AdviceKind::Hold if advice.met_once => tl!("hold · one more session").to_owned(),

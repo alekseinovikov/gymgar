@@ -475,7 +475,7 @@ fn a_tile_that_asks_to_add_has_the_accent_border_and_a_dimmed_one_is_faded() {
 fn a_status_label_is_drawn_in_the_colour_of_its_tone() {
     let mut harness = ui_harness(
         |ui, _: &mut ()| {
-            advice_label(ui, "↑ can add 85 kg", Tone::Accent);
+            advice_label(ui, "can add 85 kg", Tone::Accent);
             advice_label(ui, "hold · 6 of 10", Tone::Dim);
             advice_label(ui, "break · 10 wk", Tone::Warning);
         },
@@ -483,7 +483,7 @@ fn a_status_label_is_drawn_in_the_colour_of_its_tone() {
     );
     harness.run();
     let t = Tokens::SPORT;
-    for (text, color) in [("↑ can add 85 kg", t.accent), ("hold · 6 of 10", t.text_dim), ("break · 10 wk", t.warning)] {
+    for (text, color) in [("can add 85 kg", t.accent), ("hold · 6 of 10", t.text_dim), ("break · 10 wk", t.warning)] {
         harness.get_by_label(text);
         assert_eq!(text_colour(&harness, text), Some(color), "{text}");
     }
@@ -491,6 +491,43 @@ fn a_status_label_is_drawn_in_the_colour_of_its_tone() {
     let rects = painted_rects(&harness);
     assert!(rects.iter().any(|(fill, _, _)| *fill == t.accent_soft));
     assert!(rects.iter().filter(|(_, _, radius)| *radius == CornerRadius::from(metrics::PILL_RADIUS)).count() >= 3);
+}
+
+/// The points of every three-point line painted in `color` in the last frame: what the chevron of a status label is.
+fn chevrons(harness: &egui_kittest::Harness<'_, impl Sized>, color: egui::Color32) -> Vec<Vec<egui::Pos2>> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            Shape::Path(path) if path.points.len() == 3 && path.stroke.color == egui::epaint::ColorMode::Solid(color) => Some(path.points.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_status_label_that_asks_to_add_has_an_up_chevron_before_its_text() {
+    let mut harness = ui_harness(
+        |ui, _: &mut ()| {
+            advice_label(ui, "can add 85 kg", Tone::Accent);
+            advice_label(ui, "hold · 6 of 10", Tone::Dim);
+            advice_label(ui, "break · 10 wk", Tone::Warning);
+        },
+        (),
+    );
+    harness.run();
+    let t = Tokens::SPORT;
+    let text = harness.get_by_label("can add 85 kg").rect();
+    // One chevron, in the label's colour, drawn with the painter: an apex over two feet, to the left of the text and as
+    // high as it is.
+    let drawn = chevrons(&harness, t.accent);
+    let [chevron] = drawn.as_slice() else { panic!("one chevron expected, got {drawn:?}") };
+    let [left, apex, right] = chevron.as_slice() else { panic!("three points") };
+    assert!(apex.y < left.y && apex.y < right.y && left.x < apex.x && apex.x < right.x, "an up-chevron: {chevron:?}");
+    assert!(right.x < text.left() && left.y < text.bottom() && apex.y > text.top(), "before the text, at its height: {chevron:?} vs {text:?}");
+    // The other tones have no chevron.
+    assert!(chevrons(&harness, t.text_dim).is_empty() && chevrons(&harness, t.warning).is_empty());
 }
 
 /// The size the sparkline tests give the chart.

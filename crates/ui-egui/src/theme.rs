@@ -169,6 +169,12 @@ pub mod metrics {
     pub const PILL_RADIUS: f32 = 10.0;
     pub const PILL_PADDING_X: i8 = 8;
     pub const PILL_PADDING_Y: i8 = 2;
+    /// The up-chevron before the text of a status that asks to add weight: its size, the thickness of its line and the
+    /// space between it and the text. The fonts have no arrow, so it is drawn.
+    pub const CHEVRON_WIDTH: f32 = 8.0;
+    pub const CHEVRON_HEIGHT: f32 = 5.0;
+    pub const CHEVRON_STROKE: f32 = 1.6;
+    pub const CHEVRON_GAP: f32 = 4.0;
 }
 
 fn tokens_id() -> Id {

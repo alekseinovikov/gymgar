@@ -63,7 +63,7 @@ fn tiles_show_every_status() {
     for lang in Lang::ALL {
         let harness = tiles(lang);
         let statuses = [
-            pick(lang, "↑ can add 85 kg", "↑ можно 85 кг"),
+            pick(lang, "can add 85 kg", "можно 85 кг"),
             pick(lang, "hold · 8 of 10", "держим · 8 из 10"),
             pick(lang, "no target", "нет цели"),
             pick(lang, "break · 5 wk", "перерыв · 5 нед."),
@@ -95,6 +95,29 @@ fn only_the_tile_that_asks_to_add_has_the_accent_border() {
         .filter(|clipped| matches!(&clipped.shape, egui::Shape::Rect(rect) if rect.fill == t.card && rect.stroke.color == t.accent))
         .count();
     assert_eq!(accented, 1, "one of the five tiles asks to add weight");
+}
+
+#[test]
+fn the_tile_that_asks_to_add_has_a_chevron_before_its_status_and_the_others_have_none() {
+    for lang in Lang::ALL {
+        let harness = tiles(lang);
+        let accent = Tokens::SPORT.accent;
+        let chevrons: Vec<Vec<egui::Pos2>> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Path(path) if path.points.len() == 3 && path.stroke.color == egui::epaint::ColorMode::Solid(accent) => Some(path.points.clone()),
+                _ => None,
+            })
+            .collect();
+        let status = harness.get_by_label(pick(lang, "can add 85 kg", "можно 85 кг")).rect();
+        let [chevron] = chevrons.as_slice() else { panic!("{lang:?}: one chevron expected, got {chevrons:?}") };
+        assert!(
+            chevron.iter().all(|point| point.x < status.left() && point.y > status.top() && point.y < status.bottom()),
+            "{lang:?}: {chevron:?} vs {status:?}"
+        );
+    }
 }
 
 #[test]
@@ -182,12 +205,12 @@ fn a_tile_opens_its_exercise_and_back_returns_to_the_tiles() {
         harness.get_by_role_and_label(Role::Heading, "Squat");
         assert!(harness.query_by_role_and_label(Role::Button, "Bench press").is_none(), "{lang:?}: the tiles are gone");
 
-        click(&mut harness, pick(lang, "← Back", "← Назад"));
+        click(&mut harness, pick(lang, "Back", "Назад"));
         assert_eq!(harness.state().ui.progress.open, None, "{lang:?}");
         assert_eq!(shown_names(&harness), NAMES, "{lang:?}");
         // The tile is a toggle-less button that a screen reader hears with what it says.
         let description = harness.get_by_role_and_label(Role::Button, "Squat").accesskit_node().description();
-        assert_eq!(description.as_deref(), Some(pick(lang, "80 kg × 10 · ↑ can add 85 kg", "80 кг × 10 · ↑ можно 85 кг")), "{lang:?}");
+        assert_eq!(description.as_deref(), Some(pick(lang, "80 kg × 10 · can add 85 kg", "80 кг × 10 · можно 85 кг")), "{lang:?}");
     }
 }
 
@@ -331,12 +354,8 @@ fn advice_short_says_one_thing_per_status() {
         ..advice(AdviceKind::Hold)
     };
     let table: Vec<(ProgressItemView, &str, &str)> = vec![
-        (
-            item(AdviceView { target: Some(10), next_weight_kg: Some(85.0), ..advice(AdviceKind::Add) }, working(80.0, &[10])),
-            "↑ can add 85 kg",
-            "↑ можно 85 кг",
-        ),
-        (item(AdviceView { next_weight_kg: Some(82.5), ..advice(AdviceKind::Add) }, working(80.0, &[10])), "↑ can add 82.5 kg", "↑ можно 82,5 кг"),
+        (item(AdviceView { target: Some(10), next_weight_kg: Some(85.0), ..advice(AdviceKind::Add) }, working(80.0, &[10])), "can add 85 kg", "можно 85 кг"),
+        (item(AdviceView { next_weight_kg: Some(82.5), ..advice(AdviceKind::Add) }, working(80.0, &[10])), "can add 82.5 kg", "можно 82,5 кг"),
         // The fewest reps of the last session over the target.
         (item(hold(10, false, None), working(90.0, &[8, 8, 6])), "hold · 6 of 10", "держим · 6 из 10"),
         (item(hold(8, false, None), working(100.0, &[7])), "hold · 7 of 8", "держим · 7 из 8"),
@@ -349,7 +368,7 @@ fn advice_short_says_one_thing_per_status() {
         (item(advice(AdviceKind::Bodyweight), working(0.0, &[12])), "bodyweight", "без веса"),
         (item(advice(AdviceKind::NoTarget), working(60.0, &[10])), "no target", "нет цели"),
         // An answer that lacks what its status rests on still says something.
-        (item(advice(AdviceKind::Add), working(80.0, &[10])), "↑ can add", "↑ можно добавлять"),
+        (item(advice(AdviceKind::Add), working(80.0, &[10])), "can add", "можно добавлять"),
         (item(advice(AdviceKind::Hold), working(80.0, &[10])), "hold", "держим"),
         (item(hold(10, false, None), working(80.0, &[])), "hold", "держим"),
         (item(advice(AdviceKind::Break), working(80.0, &[10])), "break", "перерыв"),
