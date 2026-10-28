@@ -1,4 +1,4 @@
-use chrono::TimeDelta;
+use chrono::{TimeDelta, TimeZone, Utc};
 use egui::Role;
 use egui_kittest::kittest::Queryable;
 use gymgar_domain::{ConnectionStatus, ExerciseId, GarminConnection, RecordedSet, STRENGTH_TYPE_KEY};
@@ -9,7 +9,11 @@ use crate::Section;
 use crate::activity_detail_ui::exercise_name;
 use crate::i18n::Lang;
 use crate::state::{ListFilter, ProgressFilter};
-use crate::test_support::{app_connected, app_in, app_seeded, app_with_workouts, click, harness, listed, pick, store_activities, working_connection};
+use crate::test_support::{
+    app_connected, app_in, app_seeded, app_with_workouts, click, harness, harness_sized, listed, pick, seed_titled_workout, store_activities,
+    working_connection,
+};
+use crate::theme::metrics;
 
 /// The state line of the Garmin card on a working connection.
 const CONNECTED_TEXT: (&str, &str) = ("Connected", "Подключено");
@@ -281,6 +285,52 @@ fn a_card_lists_the_exercises_that_can_take_more_weight() {
         assert!(harness.query_by_label("Bench press").is_none(), "{lang:?}");
         harness.get_by_role_and_label(Role::Button, pick(lang, "Open progress", "Открыть прогресс"));
     }
+}
+
+/// Where the label `text` is drawn.
+fn label_rect(harness: &egui_kittest::Harness<'_, crate::GymgarApp>, text: &str) -> egui::Rect {
+    harness.get_by_label(text).rect()
+}
+
+#[test]
+fn a_range_follows_its_name_on_one_line() {
+    for lang in Lang::ALL {
+        let (app, _handles) = app_with_workouts(lang, &two_can_add());
+        let harness = harness(app);
+        // The window is 1200 points wide: a range at the card's far edge would be about a thousand points from its name.
+        for (name, range) in [("Squat", pick(lang, "80 to 85 kg", "80 до 85 кг")), ("Deadlift", pick(lang, "50 to 52.5 kg", "50 до 52,5 кг"))] {
+            let (name, range) = (label_rect(&harness, name), label_rect(&harness, range));
+            assert!((name.center().y - range.center().y).abs() < 1.0, "{lang:?}: one line: {name:?} and {range:?}");
+            let between = range.left() - name.right();
+            assert!((0.0..=metrics::GAP + 1.0).contains(&between), "{lang:?}: the range is {between} points from its name");
+        }
+    }
+}
+
+#[test]
+fn a_long_name_is_cut_and_the_range_stays_whole_on_its_line() {
+    // The watch's own title for a squat, as long as the longest names Garmin's programs have.
+    let title = "Приседания со штангой на спине с паузой внизу и подъёмом на носки, узкая постановка ног".to_owned();
+    let (app, _handles) = app_seeded(Lang::Ru, TestConfig::default(), true, |store| {
+        for (id, day) in [(7_200_001, 17), (7_200_002, 24)] {
+            let start = Utc.with_ymd_and_hms(2026, 10, day, 6, 0, 0).single().expect("a valid time");
+            seed_titled_workout(store, id, start, vec![lift(SQUAT, 80.0, 10)], vec![(SQUAT, title.clone())]);
+            let start = start + TimeDelta::hours(1);
+            seed_titled_workout(store, id + 10, start, vec![lift(DEADLIFT, 50.0, 10)], Vec::new());
+        }
+    });
+    let window = egui::vec2(800.0, 500.0);
+    let mut harness = harness_sized(app, window);
+    harness.run();
+    let range = harness.get_by_role_and_label(Role::Label, "80 до 85 кг").rect();
+    let name = harness.get_by_role_and_label(Role::Label, &title).rect();
+    assert!(name.right() <= range.left(), "the name runs into the range: {name:?} and {range:?}");
+    assert!(range.right() <= window.x, "the range runs out of the window: {range:?}");
+    // The name takes what the range leaves: it is cut, not wrapped, and the range is just after it.
+    assert!(range.left() - name.right() <= metrics::GAP + 1.0, "{name:?} and {range:?}");
+    let short = harness.get_by_role_and_label(Role::Label, "Deadlift").rect();
+    assert_eq!(name.height().round(), short.height().round(), "the name wraps");
+    assert!((name.center().y - range.center().y).abs() < 1.0, "one line: {name:?} and {range:?}");
 }
 
 #[test]

@@ -342,6 +342,27 @@ fn harness_at_size(app: GymgarApp, size: egui::Vec2) -> Harness<'static, GymgarA
     harness
 }
 
+#[test]
+fn a_long_explanation_wraps_inside_a_narrow_window() {
+    // After a break the explanation is the longest text of the page: wider than the card of a window of 800 points when it
+    // is not cut at the card's width.
+    let workouts = [
+        ("2026-06-19 08:00:00", Some("Legs"), vec![squat(40.0, 10)]),
+        ("2026-07-19 08:00:00", Some("Legs"), vec![squat(40.0, 10)]),
+        ("2026-10-21 08:00:00", Some("Legs"), vec![squat(30.0, 8)]),
+    ];
+    let size = egui::vec2(800.0, 500.0);
+    for lang in Lang::ALL {
+        let harness = page(lang, &workouts, size);
+        let text = harness.get_by_label_contains(pick(lang, "After a 13-week break", "После перерыва в 13 недель")).rect();
+        // The page keeps its margin: a text too wide for its card widens the card, and the sessions under it, past it.
+        let edge = size.x - f32::from(metrics::SCREEN_MARGIN);
+        let row = harness.get_by_role_and_label(Role::Button, pick(lang, "21 October", "21 октября")).rect();
+        assert!(row.right() <= edge + 0.5, "{lang:?}: the page runs out of its margin: {row:?}, the margin is at {edge}");
+        assert!(text.right() < row.right(), "{lang:?}: the text runs out of its card: {text:?} and {row:?}");
+    }
+}
+
 /// The circles of the last frame: (fill, stroke colour) of each.
 fn circles(harness: &Harness<'_, GymgarApp>) -> Vec<(egui::Color32, egui::Color32)> {
     harness

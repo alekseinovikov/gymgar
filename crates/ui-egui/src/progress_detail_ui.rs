@@ -95,7 +95,8 @@ fn advice_card(ui: &mut Ui, item: &ProgressItemView, title: &str, explanation: &
         widgets::advice_title(ui, title, tone);
         ui.add_space(metrics::GAP / 2.0);
         ui.scope(|ui| {
-            ui.set_max_width(metrics::ADVICE_TEXT_MAX_WIDTH);
+            // Never wider than the card: `set_max_width` would let a long text run past a narrow window and widen the page.
+            ui.set_max_width(metrics::ADVICE_TEXT_MAX_WIDTH.min(ui.available_width()));
             ui.add(Label::new(RichText::new(explanation).color(t.text)).selectable(false));
         });
     });

@@ -7,7 +7,7 @@
 //! It only draws what the window has read: which exercises can take more weight, and to what, is the answer of
 //! `progress.list` ([`GymgarApp::progress`]).
 
-use egui::{Label, RichText, Sides, TextStyle, Ui};
+use egui::{Color32, Label, RichText, TextStyle, Ui};
 use gymgar_domain::{ConnectionStatus, STRENGTH_TYPE_KEY};
 use gymgar_engine::{ActivityListItemView, AdviceKind, GarminStatusView, ProgressItemView};
 
@@ -123,20 +123,11 @@ fn can_add_card(app: &mut GymgarApp, ui: &mut Ui) {
         widgets::card_title(ui, &title);
         ui.add_space(metrics::GAP / 2.0);
         for item in add.iter().take(CAN_ADD_LISTED) {
-            // A line of text, not a row of controls.
-            Sides::new().height(ui.text_style_height(&TextStyle::Body)).shrink_left().truncate().show(
-                ui,
-                |ui| {
-                    ui.add(Label::new(RichText::new(exercise_name(&item.exercise)).color(t.text)).selectable(false));
-                },
-                |ui| {
-                    let to = item.advice.next_weight_kg.map(numbers::kg);
-                    if let Some(to) = to {
-                        let range = tl!("{from} to {to}").replace("{from}", &numbers::kg_value(item.last.weight_kg)).replace("{to}", &to);
-                        ui.add(Label::new(RichText::new(range).color(t.accent)).selectable(false));
-                    }
-                },
-            );
+            let range = item
+                .advice
+                .next_weight_kg
+                .map(|to| tl!("{from} to {to}").replace("{from}", &numbers::kg_value(item.last.weight_kg)).replace("{to}", &numbers::kg(to)));
+            can_add_row(ui, &t, exercise_name(&item.exercise), range.as_deref());
         }
         let more = add.len().saturating_sub(CAN_ADD_LISTED);
         if more > 0 {
@@ -150,6 +141,28 @@ fn can_add_card(app: &mut GymgarApp, ui: &mut Ui) {
         app.ui.progress.filter = ProgressFilter::Add;
         app.open_exercise(None);
     }
+}
+
+/// One line of the card: the exercise, and the range of weights right after its name, as one reads "Squat 90 to 95 kg" (a
+/// range at the far edge of a wide window is far from what it is the range of). A name too long for the line is cut, never
+/// the range: the range is what the card is for.
+fn can_add_row(ui: &mut Ui, t: &Tokens, name: &str, range: Option<&str>) {
+    let font = TextStyle::Body.resolve(ui.style());
+    let range_width = range.map_or(0.0, |range| ui.painter().layout_no_wrap(range.to_owned(), font, Color32::PLACEHOLDER).size().x);
+    // A line of text, not a row of controls.
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = ui.text_style_height(&TextStyle::Body);
+        ui.horizontal(|ui| {
+            let gap = if range.is_some() { ui.spacing().item_spacing.x } else { 0.0 };
+            ui.scope(|ui| {
+                ui.set_max_width((ui.available_width() - range_width - gap).max(0.0));
+                ui.add(Label::new(RichText::new(name).color(t.text)).truncate().selectable(false));
+            });
+            if let Some(range) = range {
+                ui.add(Label::new(RichText::new(range).color(t.accent)).selectable(false));
+            }
+        });
+    });
 }
 
 /// A connection that works, and how its import stands. `Unverified`: the last check got no answer from Garmin, so this is
