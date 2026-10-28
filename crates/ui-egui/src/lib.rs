@@ -27,4 +27,4 @@ pub mod widgets;
 
 pub use app::GymgarApp;
 pub use startup_error::StartupErrorApp;
-pub use state::{ActivitiesState, ConnectForm, ListFilter, Picker, PickerTarget, Section, SetEdit, UiState};
+pub use state::{ActivitiesState, ConnectForm, ListFilter, Picker, PickerTarget, ProgressFilter, ProgressState, Section, SetEdit, UiState};

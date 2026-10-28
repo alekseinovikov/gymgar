@@ -6,6 +6,7 @@ use gymgar_engine::{ExerciseHitView, ExerciseView, JobId};
 use super::*;
 
 const KEY: &str = "gk_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const SQUAT: &str = "squat/barbell_back_squat";
 
 fn filled_in() -> UiState {
     UiState {
@@ -21,6 +22,7 @@ fn filled_in() -> UiState {
             confirm_disconnect: true,
         },
         activities: ActivitiesState { selected: Some(1_000_001), filter: ListFilter::New, ..ActivitiesState::default() },
+        progress: ProgressState { filter: ProgressFilter::Add, open: Some(SQUAT.to_owned()) },
     }
 }
 
@@ -32,15 +34,18 @@ fn a_new_state_opens_the_summary_with_a_one_year_term() {
     assert!(state.connect.key.is_empty());
     assert_eq!((state.connect.allow_file_store, state.connect.replacing, state.connect.confirm_disconnect), (false, false, false));
     assert_eq!((state.connect.error, state.connect.pending, state.connect.disconnecting), (None, None, None));
+    // The progress tiles start on the whole list with no exercise open.
+    assert_eq!(state.progress, ProgressState { filter: ProgressFilter::All, open: None });
 }
 
-/// What a restart brings back of `filled_in()`: the section, the term, and the activity and filter of the list.
-/// Everything else is transient.
+/// What a restart brings back of `filled_in()`: the section, the term, the activity and filter of the list, and the filter and
+/// open exercise of Progress. Everything else is transient.
 fn after_a_restart() -> UiState {
     UiState {
         section: Section::Settings,
         connect: ConnectForm { term: KeyTerm::Days90, ..ConnectForm::default() },
         activities: ActivitiesState { selected: Some(1_000_001), filter: ListFilter::New, ..ActivitiesState::default() },
+        progress: ProgressState { filter: ProgressFilter::Add, open: Some(SQUAT.to_owned()) },
     }
 }
 
@@ -78,10 +83,37 @@ fn the_json_uses_the_names_of_the_commands() {
             "section": "settings",
             "connect": { "term": 90 },
             "activities": { "selected": 1_000_001_i64, "filter": "new" },
+            "progress": { "filter": "add", "open": "squat/barbell_back_squat" },
         })
     );
     let json = serde_json::to_value(UiState { section: Section::Activities, ..UiState::default() }).expect("serialize");
-    assert_eq!(json, serde_json::json!({ "section": "activities", "connect": { "term": 365 }, "activities": { "filter": "all" } }));
+    assert_eq!(
+        json,
+        serde_json::json!({ "section": "activities", "connect": { "term": 365 }, "activities": { "filter": "all" }, "progress": { "filter": "all" } })
+    );
+    let json = serde_json::to_value(UiState { section: Section::Progress, ..UiState::default() }).expect("serialize");
+    assert_eq!(json["section"], "progress");
+    for (filter, name) in [(ProgressFilter::All, "all"), (ProgressFilter::Add, "add"), (ProgressFilter::Break, "break")] {
+        assert_eq!(serde_json::to_value(filter).expect("serialize"), name);
+    }
+}
+
+#[test]
+fn the_progress_section_and_its_state_survive_a_restart() {
+    let state =
+        UiState { section: Section::Progress, progress: ProgressState { filter: ProgressFilter::Break, open: Some(SQUAT.to_owned()) }, ..UiState::default() };
+    let json = serde_json::to_string(&state).expect("serialize");
+    assert_eq!(serde_json::from_str::<UiState>(&json).expect("deserialize"), state);
+
+    let mut storage = MemoryStorage::default();
+    state.save(&mut storage);
+    assert_eq!(UiState::load(Some(&storage)), state);
+
+    // Nothing open is not written, and comes back as nothing open.
+    let closed = UiState { section: Section::Progress, progress: ProgressState { filter: ProgressFilter::Add, open: None }, ..UiState::default() };
+    let json = serde_json::to_value(&closed).expect("serialize");
+    assert_eq!(json["progress"], serde_json::json!({ "filter": "add" }));
+    assert_eq!(serde_json::from_value::<UiState>(json).expect("deserialize"), closed);
 }
 
 #[test]
@@ -93,6 +125,12 @@ fn missing_fields_fall_back_to_the_defaults() {
     assert_eq!(partial.activities, ActivitiesState { selected: None, filter: ListFilter::All, ..ActivitiesState::default() });
     let partial: UiState = serde_json::from_str(r#"{"activities":{"filter":"strength"}}"#).expect("partial");
     assert_eq!(partial.activities, ActivitiesState { selected: None, filter: ListFilter::Strength, ..ActivitiesState::default() });
+    // A state saved before Progress existed opens it on the whole list with nothing open.
+    assert_eq!(partial.progress, ProgressState::default());
+    let old: UiState = serde_json::from_str(r#"{"section":"activities","connect":{"term":90},"activities":{"selected":5,"filter":"new"}}"#).expect("old");
+    assert_eq!((old.section, old.progress), (Section::Activities, ProgressState { filter: ProgressFilter::All, open: None }));
+    let partial: UiState = serde_json::from_str(r#"{"progress":{"open":"squat/barbell_back_squat"}}"#).expect("partial");
+    assert_eq!(partial.progress, ProgressState { filter: ProgressFilter::All, open: Some("squat/barbell_back_squat".to_owned()) });
     // A term the app does not offer is an error, not a silent fallback.
     assert!(serde_json::from_str::<UiState>(r#"{"connect":{"term":31}}"#).is_err());
 }

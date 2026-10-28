@@ -53,7 +53,7 @@ fn the_first_run_has_one_card_and_no_connected_text() {
         let (app, _handles) = app_in(lang, TestConfig::default());
         let harness = harness(app);
         assert!(harness.query_by_label(pick(lang, CONNECTED_TEXT.0, CONNECTED_TEXT.1)).is_none());
-        assert_eq!(harness.get_all_by_role(Role::Button).count(), 4, "{lang:?}: the three rail buttons and the one on the card");
+        assert_eq!(harness.get_all_by_role(Role::Button).count(), 5, "{lang:?}: the four rail buttons and the one on the card");
     }
 }
 

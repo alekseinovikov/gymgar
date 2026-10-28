@@ -7,7 +7,8 @@
 //! ```
 //!
 //! Without `GYMGAR_SNAPSHOTS` it writes nothing. It draws the real app (its `logic` and `ui`), 1200x800 points at a
-//! scale of 2, in English and in Russian: `<state>-en.png` and `<state>-ru.png`. The Activities screen and the Summary
+//! scale of 2, in English and in Russian: `<state>-en.png` and `<state>-ru.png` (`progress-*` is the Progress section, which
+//! draws only its title for now). The Activities screen and the Summary
 //! with activities are drawn at the smallest window too, 800x500: `<state>-800-<lang>.png`; so is the open activity
 //! (`detail-*`): a strength workout with corrections, another activity, and the three states without sets; and the
 //! correcting of it (`edit-*`): the line of a set open in the editor, its error, and the exercise picker.
@@ -220,6 +221,9 @@ fn render_snapshots() {
         // 1. The first run: an empty Summary with the invitation.
         let (app, _handles) = app_in(lang, on_hold());
         save(&mut window(app, Section::Summary), &directory, "summary-empty", lang);
+        // The Progress section, which draws only its title for now, beside the rail of four icons.
+        let (app, _handles) = app_in(lang, on_hold());
+        save(&mut window(app, Section::Progress), &directory, "progress", lang);
 
         // 2. Settings before connecting, with the key typed and Garmin's refusal under the form.
         let cfg = TestConfig { garmin: Err(GarminAuthError::KeyRejected), ..on_hold() };

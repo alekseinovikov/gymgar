@@ -1,11 +1,12 @@
 //! The purely visual state of the window: which section is open, the draft of the connect form, the activity list's
-//! filter and selection, and the set being corrected with the exercise picker.
+//! filter and selection, the set being corrected with the exercise picker, and the progress tiles' filter and open exercise.
 //!
 //! Plain data with `serde`, so eframe can keep it between runs and automation can read it. Only the section, the key
-//! term and the list's filter and selected activity are kept: the key the user is typing (never serialized, never
-//! printed) and everything that is state of the moment (an error, a running check or disconnect, a consent, a
-//! confirmation, a set being edited, an open picker) starts over with each run. What the screens show of the outside world (the connection, the language,
-//! the activities) belongs to the engine and is read from it, not kept here.
+//! term, the list's filter and selected activity and Progress's filter and open exercise are kept: the key the user is
+//! typing (never serialized, never printed) and everything that is state of the moment (an error, a running check or
+//! disconnect, a consent, a confirmation, a set being edited, an open picker) starts over with each run. What the screens
+//! show of the outside world (the connection, the language, the activities, the progress) belongs to the engine and is
+//! read from it, not kept here.
 
 use std::fmt;
 
@@ -21,6 +22,7 @@ pub struct UiState {
     pub section: Section,
     pub connect: ConnectForm,
     pub activities: ActivitiesState,
+    pub progress: ProgressState,
 }
 
 impl UiState {
@@ -45,7 +47,31 @@ pub enum Section {
     #[default]
     Summary,
     Activities,
+    Progress,
     Settings,
+}
+
+/// What the Progress section shows: which tiles the list holds and which exercise is open.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ProgressState {
+    pub filter: ProgressFilter,
+    /// The key of the exercise whose page is open (`deadlift/romanian_deadlift`). One that is no longer among the tiles
+    /// (every workout of it excluded, say) opens nothing: the window drops it when it reads the tiles.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open: Option<String>,
+}
+
+/// The chips above the progress tiles.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProgressFilter {
+    #[default]
+    All,
+    /// Only the exercises that advise adding weight.
+    Add,
+    /// Only the exercises that have not been done for more than four weeks.
+    Break,
 }
 
 /// What the Activities screen shows: which activities the list holds and which one is open beside it, and what of it the
