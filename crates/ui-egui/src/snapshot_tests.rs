@@ -7,10 +7,13 @@
 //! ```
 //!
 //! Without `GYMGAR_SNAPSHOTS` it writes nothing. It draws the real app (its `logic` and `ui`), 1200x800 points at a
-//! scale of 2, in English and in Russian: `<state>-en.png` and `<state>-ru.png` (`progress-*` is the Progress section: the
-//! tiles of every status, at both sizes, with a chip chosen, and with nothing to show; `progress-detail-*` the page of an
-//! exercise; `summary-can-add*` the Summary with the card of what can take more weight and `detail-can-add*` an open
-//! workout whose exercise can). The Activities screen and the Summary
+//! scale of 2, in English and in Russian: `<state>-en.png` and `<state>-ru.png`. `progress-*` is the Progress section, each
+//! at the smallest window too (800x500, `-800`): the tiles of every status (`progress-tiles`, and `-800-tall` with every
+//! tile in view at the narrow width), with a chip chosen (`progress-add`, `progress-break-filter`) and with nothing to
+//! show (`progress-empty`, and `progress-empty-not-connected`). `progress-detail-<state>` is the page of an exercise (`add`,
+//! `hold`, `after-break`, `bodyweight`, `break`), also as a narrow window as tall as the page (`-800-tall`);
+//! `progress-detail-programs` the same with programs named. `summary-can-add*` is the Summary with the card of what can
+//! take more weight and `detail-can-add*` an open workout whose exercise can. The Activities screen and the Summary
 //! with activities are drawn at the smallest window too, 800x500: `<state>-800-<lang>.png`; so is the open activity
 //! (`detail-*`): a strength workout with corrections, another activity, and the three states without sets; and the
 //! correcting of it (`edit-*`): the line of a set open in the editor, its error, and the exercise picker.
@@ -78,6 +81,9 @@ fn eframe_window(app: GymgarApp, size: egui::Vec2) -> Shot {
 
 /// The two window sizes of the Activities screen: the start window and the smallest one.
 const SIZES: [(egui::Vec2, &str); 2] = [(WINDOW, ""), (egui::vec2(800.0, 500.0), "-800")];
+
+/// The sizes of the page of an exercise: [`SIZES`], and a narrow window as tall as the whole page.
+const DETAIL_SIZES: [(egui::Vec2, &str); 3] = [SIZES[0], SIZES[1], (egui::vec2(800.0, 1150.0), "-800-tall")];
 
 /// Activities that look like a real history: two weeks of strength workouts and runs, two of them not opened yet, on top
 /// of the engine's fixtures (whose names are scrubbed to their types). The last sync ended an hour ago.
@@ -201,7 +207,9 @@ const fn exercise(category: u16, name: Option<u16>) -> ExerciseId {
 
 /// Eleven exercises that look like half a year of training, one for each way a tile looks: three that can add weight, two
 /// to hold (the second with a name too long for its tile), one after a break, bodyweight, no target, a break, and two nobody
-/// has done for months (the older one more than a year, with no chart left).
+/// has done for months (the older one more than a year, with no chart left). An exercise comes back every three weeks or so,
+/// as a program's does, so the only breaks on a chart (more than four weeks) are the ones meant: two in the history of the
+/// row and of the leg curl, and the one the flye, the curl and the lateral raise are on now.
 fn lifts() -> [Lift; 11] {
     [
         lift(
@@ -209,12 +217,14 @@ fn lifts() -> [Lift; 11] {
             "Румынская становая тяга",
             Some(10),
             &[
-                (200, 40.0, &[10]),
-                (170, 50.0, &[10]),
-                (140, 55.0, &[10]),
-                (110, 60.0, &[10]),
-                (80, 65.0, &[10]),
-                (50, 65.0, &[10]),
+                (189, 40.0, &[10]),
+                (168, 45.0, &[10]),
+                (147, 50.0, &[10]),
+                (126, 55.0, &[10]),
+                (105, 55.0, &[10]),
+                (84, 60.0, &[10]),
+                (63, 65.0, &[10]),
+                (42, 65.0, &[10]),
                 (24, 70.0, &[10, 10]),
                 (10, 70.0, &[10, 10]),
             ],
@@ -223,19 +233,48 @@ fn lifts() -> [Lift; 11] {
             exercise(24, None),
             "Жим гантелей над головой",
             Some(10),
-            &[(150, 40.0, &[10]), (120, 42.0, &[10]), (90, 44.0, &[10]), (60, 46.0, &[10]), (30, 48.0, &[10]), (9, 48.0, &[10])],
+            &[
+                (147, 40.0, &[10]),
+                (126, 42.0, &[10]),
+                (105, 44.0, &[10]),
+                (84, 46.0, &[10]),
+                (63, 46.0, &[10]),
+                (42, 46.0, &[10]),
+                (21, 48.0, &[10]),
+                (9, 48.0, &[10]),
+            ],
         ),
         lift(
             exercise(28, None),
             "Приседание со штангой",
             Some(10),
-            &[(190, 60.0, &[10]), (160, 70.0, &[10]), (120, 80.0, &[10]), (90, 85.0, &[10]), (60, 90.0, &[10]), (22, 90.0, &[10]), (8, 90.0, &[10])],
+            &[
+                (189, 60.0, &[10]),
+                (168, 65.0, &[10]),
+                (147, 70.0, &[10]),
+                (126, 75.0, &[10]),
+                (105, 80.0, &[10]),
+                (84, 85.0, &[10]),
+                (63, 85.0, &[10]),
+                (42, 90.0, &[10]),
+                (22, 90.0, &[10]),
+                (8, 90.0, &[10]),
+            ],
         ),
         lift(
             exercise(0, Some(1)),
             "Жим штанги лёжа",
             Some(10),
-            &[(170, 85.0, &[10]), (120, 90.0, &[10]), (70, 95.0, &[10]), (30, 95.0, &[10]), (9, 95.0, &[8, 8, 6])],
+            &[
+                (147, 85.0, &[10]),
+                (126, 85.0, &[10]),
+                (105, 90.0, &[10]),
+                (84, 90.0, &[10]),
+                (63, 95.0, &[10]),
+                (42, 95.0, &[10]),
+                (21, 95.0, &[10]),
+                (9, 95.0, &[8, 8, 6]),
+            ],
         ),
         lift(
             exercise(23, None),
@@ -243,15 +282,15 @@ fn lifts() -> [Lift; 11] {
             Some(10),
             &[(130, 55.0, &[10]), (90, 60.0, &[8]), (45, 60.0, &[8]), (20, 60.0, &[8]), (6, 60.0, &[10])],
         ),
-        lift(exercise(21, None), "Подтягивания", Some(10), &[(100, 0.0, &[8]), (70, 0.0, &[9]), (40, 0.0, &[10]), (15, 0.0, &[12])]),
+        lift(exercise(21, None), "Подтягивания", Some(10), &[(85, 0.0, &[8]), (64, 0.0, &[9]), (43, 0.0, &[10]), (22, 0.0, &[11]), (6, 0.0, &[12])]),
         lift(
             exercise(30, None),
             "Разгибание рук на трицепс с канатной рукоятью на верхнем блоке стоя",
             None,
-            &[(60, 25.0, &[12]), (30, 27.5, &[12]), (11, 30.0, &[12])],
+            &[(69, 22.5, &[12]), (48, 25.0, &[12]), (27, 27.5, &[12]), (11, 30.0, &[12])],
         ),
         lift(exercise(15, None), "Сгибание ног лёжа", Some(10), &[(130, 40.0, &[10]), (100, 40.0, &[10]), (6, 30.0, &[8])]),
-        lift(exercise(9, None), "Разведение гантелей лёжа", Some(12), &[(120, 14.0, &[12]), (80, 16.0, &[12]), (44, 16.0, &[12])]),
+        lift(exercise(9, None), "Разведение гантелей лёжа", Some(12), &[(104, 14.0, &[12]), (83, 14.0, &[12]), (62, 16.0, &[12]), (44, 16.0, &[12])]),
         lift(exercise(7, None), "Сгибание рук со штангой", Some(10), &[(300, 25.0, &[10]), (260, 27.5, &[10]), (210, 30.0, &[10])]),
         lift(exercise(14, None), "Подъём гантелей в стороны", Some(15), &[(440, 8.0, &[15]), (420, 8.0, &[15])]),
     ]
@@ -350,12 +389,18 @@ fn render_snapshots() {
         for (size, suffix) in SIZES {
             let (app, _handles) = progress_app(lang);
             save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-tiles{suffix}"), lang);
+            let (mut app, _handles) = progress_app(lang);
+            app.ui.progress.filter = ProgressFilter::Add;
+            save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-add{suffix}"), lang);
+            let (app, _handles) = app_on_store(lang, Store::open_in_memory().expect("an in-memory store"));
+            save(&mut window_sized(app, Section::Progress, size), &directory, &format!("progress-empty{suffix}"), lang);
         }
+        // Every tile in view at the narrow width (two columns), the long name among them, and the chip of the breaks.
+        let (app, _handles) = progress_app(lang);
+        save(&mut window_sized(app, Section::Progress, egui::vec2(800.0, 1000.0)), &directory, "progress-tiles-800-tall", lang);
         let (mut app, _handles) = progress_app(lang);
-        app.ui.progress.filter = ProgressFilter::Add;
-        save(&mut window(app, Section::Progress), &directory, "progress-add", lang);
-        let (app, _handles) = app_on_store(lang, Store::open_in_memory().expect("an in-memory store"));
-        save(&mut window(app, Section::Progress), &directory, "progress-empty", lang);
+        app.ui.progress.filter = ProgressFilter::Break;
+        save(&mut window(app, Section::Progress), &directory, "progress-break-filter", lang);
         let (app, _handles) = app_in(lang, on_hold());
         save(&mut window(app, Section::Progress), &directory, "progress-empty-not-connected", lang);
         // The Summary with the card of the exercises that can take more weight (three of eleven), at both sizes; and the open
@@ -367,16 +412,17 @@ fn render_snapshots() {
             app.ui.activities.selected = Some(ADVICE_WORKOUT);
             save(&mut window_sized(app, Section::Activities, size), &directory, &format!("detail-can-add{suffix}"), lang);
         }
-        // The page of an exercise: one that can add weight, one with circles and two shaded breaks (at both sizes), one that
-        // came back after a break, one with no weight (a chart of reps) and one on a break that is going on.
-        for (state, title, sizes) in [
-            ("add", "Румынская становая тяга", &SIZES[..]),
-            ("hold", "Тяга штанги в наклоне", &SIZES[..]),
-            ("after-break", "Сгибание ног лёжа", &SIZES[..1]),
-            ("bodyweight", "Подтягивания", &SIZES[..1]),
-            ("break", "Сгибание рук со штангой", &SIZES[..1]),
+        // The page of an exercise: one that can add weight, one with circles and two shaded breaks, one that came back after a
+        // break, one with no weight (a chart of reps) and one on a break that is going on; at both sizes, and in a tall
+        // narrow window that shows the whole page (the chart's axes and the sessions) at the narrow width.
+        for (state, title) in [
+            ("add", "Румынская становая тяга"),
+            ("hold", "Тяга штанги в наклоне"),
+            ("after-break", "Сгибание ног лёжа"),
+            ("bodyweight", "Подтягивания"),
+            ("break", "Сгибание рук со штангой"),
         ] {
-            for &(size, suffix) in sizes {
+            for (size, suffix) in DETAIL_SIZES {
                 let (mut app, _handles) = progress_app(lang);
                 let key = app.progress().iter().find(|item| item.exercise.watch_title.as_deref() == Some(title)).map(|item| item.exercise.id.clone());
                 app.open_exercise(Some(key.expect("a tile of this exercise")));
